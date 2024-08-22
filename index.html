@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model Viewer</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; }
+        h1 { text-align: center; }
+        canvas { display: block; margin: 0 auto; }
+        #3d-viewer { width: 100%; height: 600px; }
+    </style>
+</head>
+<body>
+    <h1>3D Model Viewer</h1>
+    <div id="3d-viewer"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/MTLLoader.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('3d-viewer').appendChild(renderer.domElement);
+
+        // Load the .mtl and .obj files
+        const mtlLoader = new THREE.MTLLoader();
+        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/'); // Replace with your S3 bucket URL path
+        mtlLoader.load('Test01.mtl', function (materials) {
+            materials.preload();
+
+            const objLoader = new THREE.OBJLoader();
+            objLoader.setMaterials(materials);
+            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/'); // Replace with your S3 bucket URL path
+            objLoader.load('Test01.obj', function (object) {
+                scene.add(object);
+                renderer.render(scene, camera);
+            });
+        });
+
+        camera.position.z = 5;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
