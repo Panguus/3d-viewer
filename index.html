@@ -21,22 +21,23 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // Add Ambient Light
-        const ambientLight = new THREE.AmbientLight(0x404040);
+        // Add Lights
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(50, 50, 50);
+        scene.add(pointLight);
+
+        const ambientLight = new THREE.AmbientLight(0x404040);  // Soft white light
         scene.add(ambientLight);
 
-        // Add Directional Light
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(1, 1, 1).normalize();
-        scene.add(directionalLight);
-
-        // Load the .obj file without the .mtl file
+        // Load the .obj file
         const objLoader = new THREE.OBJLoader();
         objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
         objLoader.load('Test01.obj', function (object) {
             console.log('Model loaded:', object);
-            object.position.set(0, 0, 0);
-            object.scale.set(0.01, 0.01, 0.01);  // Scale down the model if it's too large
+
+            object.position.set(0, 0, 0);  // Center the model
+            object.scale.set(1, 1, 1);  // Adjust scale if needed
+
             scene.add(object);
             animate();
         }, function (xhr) {
@@ -46,7 +47,7 @@
         });
 
         // Adjust camera position
-        camera.position.set(50, 50, 50);  // Move camera to a different position
+        camera.position.set(100, 100, 100);  // Move camera further back
         camera.lookAt(new THREE.Vector3(0, 0, 0));  // Ensure the camera is looking at the origin
 
         function animate() {
