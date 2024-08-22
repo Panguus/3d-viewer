@@ -7,7 +7,6 @@
     <style>
         body { margin: 0; font-family: Arial, sans-serif; }
         h1 { text-align: center; }
-        canvas { display: block; margin: 0 auto; }
         #3d-viewer { width: 100%; height: 600px; }
     </style>
 </head>
@@ -18,34 +17,67 @@
     <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/MTLLoader.js"></script>
     <script>
+        // Set up the scene, camera, and renderer
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('3d-viewer').appendChild(renderer.domElement);
 
+        // Add ambient and directional lighting
+        const ambientLight = new THREE.AmbientLight(0x404040); // soft white light
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(1, 1, 1).normalize();
+        scene.add(directionalLight);
+
         // Load the .mtl and .obj files
         const mtlLoader = new THREE.MTLLoader();
-        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/'); // Replace with your S3 bucket URL path
+        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
         mtlLoader.load('Test01.mtl', function (materials) {
             materials.preload();
 
             const objLoader = new THREE.OBJLoader();
             objLoader.setMaterials(materials);
-            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/'); // Replace with your S3 bucket URL path
+            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
             objLoader.load('Test01.obj', function (object) {
+                object.position.set(0, 0, 0);
                 scene.add(object);
                 renderer.render(scene, camera);
+            }, 
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            }, 
+            function (error) {
+                console.error('An error occurred loading the model:', error);
             });
+        }, 
+        function (xhr) {
+            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+        }, 
+        function (error) {
+            console.error('An error occurred loading the materials:', error);
         });
 
-        camera.position.z = 5;
+        // Set the camera position
+        camera.position.z = 10;
 
+        // Animation loop
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
         }
         animate();
+
+        // Resize handling
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            renderer.setSize(width, height);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+        });
     </script>
 </body>
 </html>
