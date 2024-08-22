@@ -22,6 +22,10 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('viewer').appendChild(renderer.domElement);
 
+        // Initialize OrbitControls first
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.update();
+
         // Add Lights
         const pointLight = new THREE.PointLight(0xffffff, 1);
         pointLight.position.set(50, 50, 50);
@@ -56,13 +60,9 @@
         camera.position.set(100, 100, 100);  // Move camera further back
         camera.lookAt(new THREE.Vector3(0, 0, 0));  // Ensure the camera is looking at the origin
 
-        // Add OrbitControls to allow manual camera control
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.update();
-
         function animate() {
             requestAnimationFrame(animate);
-            controls.update();
+            controls.update();  // Now controls is properly initialized
             renderer.render(scene, camera);
         }
 
