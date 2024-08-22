@@ -15,7 +15,6 @@
     <div id="3d-viewer"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/MTLLoader.js"></script>
     <script>
         // Set up the scene, camera, and renderer
         const scene = new THREE.Scene();
@@ -24,7 +23,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('3d-viewer').appendChild(renderer.domElement);
 
-        // Add ambient and directional lighting
+        // Add basic lighting
         const ambientLight = new THREE.AmbientLight(0x404040); // soft white light
         scene.add(ambientLight);
 
@@ -32,32 +31,18 @@
         directionalLight.position.set(1, 1, 1).normalize();
         scene.add(directionalLight);
 
-        // Load the .mtl and .obj files
-        const mtlLoader = new THREE.MTLLoader();
-        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
-        mtlLoader.load('Test01.mtl', function (materials) {
-            materials.preload();
-
-            const objLoader = new THREE.OBJLoader();
-            objLoader.setMaterials(materials);
-            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
-            objLoader.load('Test01.obj', function (object) {
-                object.position.set(0, 0, 0);
-                scene.add(object);
-                renderer.render(scene, camera);
-            }, 
-            function (xhr) {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-            }, 
-            function (error) {
-                console.error('An error occurred loading the model:', error);
-            });
+        // Load the .obj file
+        const objLoader = new THREE.OBJLoader();
+        objLoader.load('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/Test01.obj', function (object) {
+            object.position.set(0, 0, 0);
+            scene.add(object);
+            renderer.render(scene, camera);
         }, 
         function (xhr) {
             console.log((xhr.loaded / xhr.total * 100) + '% loaded');
         }, 
         function (error) {
-            console.error('An error occurred loading the materials:', error);
+            console.error('An error occurred loading the model:', error);
         });
 
         // Set the camera position
