@@ -6,68 +6,66 @@
     <title>3D Model Viewer</title>
     <style>
         body { margin: 0; font-family: Arial, sans-serif; }
-        h1 { text-align: center; }
-        #3d-viewer { width: 100%; height: 600px; }
+        #viewer { width: 100%; height: 100vh; display: block; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
-    <h1>3D Model Viewer</h1>
-    <div id="3d-viewer"></div>
+    <div id="viewer"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/MTLLoader.js"></script>
     <script>
-        // Set up the scene, camera, and renderer
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById('3d-viewer').appendChild(renderer.domElement);
+        document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // Add basic lighting
-        const ambientLight = new THREE.AmbientLight(0x404040); // soft white light
+        // Add Ambient Light
+        const ambientLight = new THREE.AmbientLight(0x404040);
         scene.add(ambientLight);
 
+        // Add Directional Light
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(1, 1, 1).normalize();
         scene.add(directionalLight);
 
-        // Add another directional light for better visibility
-        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 1.5);
-        directionalLight2.position.set(-1, 1, 1).normalize();
-        scene.add(directionalLight2);
+        // Load the .mtl and .obj files
+        const mtlLoader = new THREE.MTLLoader();
+        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
+        mtlLoader.load('Test01.mtl', function (materials) {
+            materials.preload();
+            console.log('Materials loaded:', materials);
 
-        // Load the .obj file
-        const objLoader = new THREE.OBJLoader();
-        objLoader.load('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/Test01.obj', function (object) {
-            object.position.set(0, 0, 0);
-            scene.add(object);
-            renderer.render(scene, camera);
-        }, 
-        function (xhr) {
-            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-        }, 
-        function (error) {
-            console.error('An error occurred loading the model:', error);
+            const objLoader = new THREE.OBJLoader();
+            objLoader.setMaterials(materials);
+            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
+            objLoader.load('Test01.obj', function (object) {
+                console.log('Model loaded:', object);
+                object.position.set(0, 0, 0);
+                object.scale.set(0.01, 0.01, 0.01);  // Scale down the model if it's too large
+                scene.add(object);
+                animate();
+            }, 
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            }, 
+            function (error) {
+                console.error('An error occurred loading the model:', error);
+            });
         });
 
-        // Set the camera position further back to ensure the model is in view
-        camera.position.z = 50;
+        // Adjust camera position
+        camera.position.set(50, 50, 50);  // Move camera to a different position
+        camera.lookAt(new THREE.Vector3(0, 0, 0));  // Ensure the camera is looking at the origin
 
-        // Add a simple cube to the scene for testing
-        const geometry = new THREE.BoxGeometry();
-        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-        const cube = new THREE.Mesh(geometry, material);
-        scene.add(cube);
-
-        // Animation loop
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
         }
-        animate();
 
-        // Resize handling
-        window.addEventListener('resize', () => {
+        window.addEventListener('resize', function() {
             const width = window.innerWidth;
             const height = window.innerHeight;
             renderer.setSize(width, height);
