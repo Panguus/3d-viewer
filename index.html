@@ -14,7 +14,6 @@
     <div id="viewer"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/MTLLoader.js"></script>
     <script>
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -31,29 +30,19 @@
         directionalLight.position.set(1, 1, 1).normalize();
         scene.add(directionalLight);
 
-        // Load the .mtl and .obj files
-        const mtlLoader = new THREE.MTLLoader();
-        mtlLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
-        mtlLoader.load('Test01.mtl', function (materials) {
-            materials.preload();
-            console.log('Materials loaded:', materials);
-
-            const objLoader = new THREE.OBJLoader();
-            objLoader.setMaterials(materials);
-            objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
-            objLoader.load('Test01.obj', function (object) {
-                console.log('Model loaded:', object);
-                object.position.set(0, 0, 0);
-                object.scale.set(0.01, 0.01, 0.01);  // Scale down the model if it's too large
-                scene.add(object);
-                animate();
-            }, 
-            function (xhr) {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-            }, 
-            function (error) {
-                console.error('An error occurred loading the model:', error);
-            });
+        // Load the .obj file without the .mtl file
+        const objLoader = new THREE.OBJLoader();
+        objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
+        objLoader.load('Test01.obj', function (object) {
+            console.log('Model loaded:', object);
+            object.position.set(0, 0, 0);
+            object.scale.set(0.01, 0.01, 0.01);  // Scale down the model if it's too large
+            scene.add(object);
+            animate();
+        }, function (xhr) {
+            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+        }, function (error) {
+            console.error('An error occurred loading the model:', error);
         });
 
         // Adjust camera position
