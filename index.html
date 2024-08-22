@@ -31,6 +31,11 @@
         directionalLight.position.set(1, 1, 1).normalize();
         scene.add(directionalLight);
 
+        // Add another directional light for better visibility
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight2.position.set(-1, 1, 1).normalize();
+        scene.add(directionalLight2);
+
         // Load the .obj file
         const objLoader = new THREE.OBJLoader();
         objLoader.load('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/Test01.obj', function (object) {
@@ -45,8 +50,14 @@
             console.error('An error occurred loading the model:', error);
         });
 
-        // Set the camera position
-        camera.position.z = 10;
+        // Set the camera position further back to ensure the model is in view
+        camera.position.z = 50;
+
+        // Add a simple cube to the scene for testing
+        const geometry = new THREE.BoxGeometry();
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const cube = new THREE.Mesh(geometry, material);
+        scene.add(cube);
 
         // Animation loop
         function animate() {
