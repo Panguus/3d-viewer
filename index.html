@@ -954,7 +954,15 @@
   }
 
   async function askGeminiForLatest(originalBook, candidates) {
-    const candidateList = candidates.map((c, i) => ({
+    // Pre-filter obvious junk before sending to Gemini
+    const cleaned = candidates.filter(c => {
+      if (c.pageCount && c.pageCount > 5000) return false; // absurd page count = bad data
+      if (c.pageCount && c.pageCount < 10) return false;   // suspiciously thin
+      return true;
+    });
+    console.log(`🧹 After junk filter: ${cleaned.length} candidates (was ${candidates.length})`);
+
+    const candidateList = cleaned.map((c, i) => ({
       index: i,
       isbn: c.isbn,
       title: c.title,
@@ -964,26 +972,33 @@
       pages: c.pageCount,
     }));
 
-    const prompt = `You are a library cataloguing expert. A library has a book on its shelf and needs to know if a newer edition exists.
+    const prompt = `You are a library cataloguing expert with deep knowledge of published books. A library needs to know if a newer genuine edition of a book exists.
 
 BOOK ON SHELF:
 Title: "${originalBook.title}"
 Authors: ${originalBook.authors.join(', ')}
 Year: ${originalBook.year}
+Publisher: ${originalBook.publisher}
 ISBN: ${originalBook.isbn}
 
 CANDIDATE EDITIONS FROM OPEN LIBRARY:
 ${JSON.stringify(candidateList, null, 2)}
 
-Your job: identify which candidate is the most recent, genuine English-language edition of the same work as the book on shelf. Rules:
-- Ignore translations, foreign-language editions, or unrelated books
-- Ignore reprints/printings that are not new editions (same content, different year)
-- The title may have changed between editions — that is fine as long as it is the same work
-- If the book on shelf IS already the latest, return {"latest_index": -1}
-- Otherwise return {"latest_index": <index of the best candidate>}
-Return only valid JSON, no explanation.`;
+IMPORTANT: Open Library data is sometimes incorrect — years, page counts, and publishers can be wrong. Use your own knowledge of this book and its publication history to sanity-check the candidates. Be skeptical of:
+- Years that seem implausible given the book's known history
+- Publishers that don't match the book's known publisher
+- Entries with missing or suspicious page counts that don't match any known edition
+- ISBNs that don't correspond to any real published edition you know of
 
-    console.log('🤖 Sending to Gemini — candidate count:', candidateList.length);
+Your job: identify which candidate is the most recent, genuine English-language edition of the same work. Rules:
+- Ignore translations, foreign-language editions, or unrelated books
+- Ignore reprints/printings that are not substantively new editions
+- The title may have changed between editions — that is fine
+- If the book on shelf IS already the latest known edition, return {"latest_index": -1}
+- Otherwise return {"latest_index": <index>, "reasoning": "<one sentence>"}
+Return only valid JSON, no extra text.`;
+
+    console.log('🤖 Sending to Gemini — candidate count after junk filter:', candidateList.length);
     console.log('🤖 Full prompt:\n', prompt);
 
     try {
@@ -1001,15 +1016,15 @@ Return only valid JSON, no explanation.`;
       const parsed = JSON.parse(clean);
       console.log('🤖 Gemini parsed JSON:', parsed);
       if (parsed.latest_index === -1) {
-        console.log('🤖 Gemini says: already the latest edition');
+        console.log('🤖 Gemini says: already the latest edition. Reasoning:', parsed.reasoning);
         return null;
       }
-      const chosen = candidates[parsed.latest_index];
-      console.log('🤖 Gemini chose index', parsed.latest_index, '→', chosen);
+      const chosen = cleaned[parsed.latest_index];
+      console.log('🤖 Gemini chose index', parsed.latest_index, '→', chosen, '| Reasoning:', parsed.reasoning);
       return chosen || null;
     } catch (err) {
       console.error('❌ Gemini call failed:', err);
-      const sorted = [...candidates].sort((a, b) => b.year - a.year);
+      const sorted = [...cleaned].sort((a, b) => b.year - a.year);
       console.log('⚠️ Falling back to newest-by-year:', sorted[0]);
       return sorted[0] || null;
     }
