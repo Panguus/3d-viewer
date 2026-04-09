@@ -994,8 +994,9 @@
     const authorKeyMatch = authorUrl.match(/\/authors\/(OL\w+)/);
     const authorKey = authorKeyMatch ? authorKeyMatch[1] : null;
 
-    // Use cover URL directly from the API response — much more accurate than guessing by ISBN
-    const coverUrl = info.cover?.large || info.cover?.medium || info.cover?.small || null;
+    // Use cover URL directly from the API response, fall back to ISBN-based cover URL
+    const coverUrl = info.cover?.large || info.cover?.medium || info.cover?.small
+      || (isbn ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg` : null);
 
     return {
       title: info.title || 'Unknown Title',
@@ -1264,10 +1265,10 @@ Return only valid JSON, no extra text.`;
     // If no language listed, assume English (most common for unlabeled entries)
     const isEnglish = langs.length === 0 || langs.some(l => l.includes('/eng'));
 
-    // Only use cover if OL has an explicit cover ID for this edition
+    // Use explicit cover ID if available, fall back to ISBN-based cover lookup
     const coverUrl = entry.covers?.[0]
       ? `https://covers.openlibrary.org/b/id/${entry.covers[0]}-M.jpg`
-      : null;
+      : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`;
 
     const publishers = (entry.publishers || []).join(', ') || workBook.publisher || '—';
 
@@ -1394,7 +1395,7 @@ Return only valid JSON, no extra text.`;
 
   function bookCardHTML(book, isNew, oldBook) {
     const cover = book.coverUrl
-      ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" onerror="this.outerHTML=noCoverHTML()">`
+      ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" onerror="this.outerHTML=noCoverHTML()" onload="checkCoverValid(this)">`
       : `<div class="no-cover">📚<br>No cover<br>available</div>`;
 
     const isLatest = isNew && oldBook && book.year && oldBook.year && book.year > oldBook.year;
@@ -1442,6 +1443,13 @@ Return only valid JSON, no extra text.`;
       ${lccDisplay}
       ${badge}
     `;
+  }
+
+  function checkCoverValid(img) {
+    // OL returns a 1x1 or tiny grey image when no cover exists — detect by natural size
+    if (img.naturalWidth <= 1 || img.naturalHeight <= 1) {
+      img.outerHTML = noCoverHTML();
+    }
   }
 
   function noCoverHTML() {
