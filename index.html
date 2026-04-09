@@ -827,9 +827,11 @@
   // ── Step 1: Fetch the scanned ISBN from Open Library ──────────────────────
   async function fetchByISBN(isbn) {
     const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
+    console.log('📡 Fetching ISBN from OL:', url);
     const res = await fetch(url);
     const data = await res.json();
     const info = data[`ISBN:${isbn}`];
+    console.log('📡 Raw OL ISBN response:', JSON.stringify(info, null, 2));
     if (!info) return null;
     return parseBookOL(info, isbn);
   }
@@ -881,7 +883,7 @@
   async function gatherAllCandidates(oldBook) {
     const results = [];
 
-    // Source 1: All editions under the same Work ID
+    // Source 1: All editions under the same Work ID (from ISBN lookup)
     if (oldBook.workKey) {
       console.log('📖 Fetching Work editions:', `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`);
       try {
@@ -893,7 +895,7 @@
           const parsed = data.entries
             .map(e => parseEditionOL(e, oldBook))
             .filter(e => e && e.year && e.isbn && e.isEnglish);
-          console.log(`📖 After filtering (English + has ISBN + has year): ${parsed.length}`, parsed.map(e => `${e.year} — ${e.title} (${e.isbn})`));
+          console.log(`📖 After filtering: ${parsed.length}`, parsed.map(e => `${e.year} — ${e.title} (${e.isbn})`));
           parsed.forEach(e => results.push(e));
         }
       } catch (err) { console.error('❌ Work editions fetch error:', err); }
@@ -901,34 +903,43 @@
       console.warn('⚠️ oldBook has no workKey — skipping Work ID lookup');
     }
 
-    // Source 2: Open Library title+author search (catches different Work IDs)
+    // Source 2: OL title+author search, then fetch editions for each work found
     const lastName = (oldBook.authors[0] || '').split(' ').pop();
-    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=15&language=eng`;
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=10&language=eng`;
     console.log('🔎 OL title+author search URL:', searchUrl);
     try {
       const res = await fetch(searchUrl);
       const data = await res.json();
-      console.log(`🔎 OL search returned ${data.docs?.length ?? 0} docs:`, data.docs?.map(d => `${d.title} (${Math.max(...(d.publish_year||[0]))}) — ISBNs: ${(d.isbn||[]).slice(0,3).join(', ')}`));
-      if (data.docs?.length) {
-        data.docs
-          .filter(d => d.isbn?.length && d.publish_year?.length)
-          .forEach(d => {
-            const year = Math.max(...d.publish_year);
-            const isbn = d.isbn.find(i => i.length === 13) || d.isbn[0];
-            const coverId = d.cover_i;
-            results.push({
-              title: d.title || oldBook.title,
-              subtitle: d.subtitle || '',
-              authors: d.author_name || oldBook.authors,
-              publisher: d.publisher?.[0] || oldBook.publisher,
-              year,
-              isbn,
-              coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null,
-              pageCount: d.number_of_pages_median || null,
-              isEnglish: true,
-            });
-          });
-      }
+      console.log(`🔎 OL search returned ${data.docs?.length ?? 0} docs:`,
+        data.docs?.map(d => ({ title: d.title, key: d.key, isbn_count: d.isbn?.length ?? 0, years: d.publish_year?.slice(0,5) }))
+      );
+
+      // For each work doc found, fetch its editions to get real ISBNs
+      const workKeys = [...new Set(
+        (data.docs || []).map(d => d.key).filter(Boolean)
+      )].slice(0, 5); // limit to 5 works to avoid too many requests
+
+      console.log('🔎 Will fetch editions for work keys:', workKeys);
+
+      await Promise.all(workKeys.map(async (workKey) => {
+        // Skip if it's the same work we already fetched
+        if (workKey === oldBook.workKey) return;
+        try {
+          const edUrl = `https://openlibrary.org${workKey}/editions.json?limit=50`;
+          console.log(`  📂 Fetching editions for ${workKey}:`, edUrl);
+          const edRes = await fetch(edUrl);
+          const edData = await edRes.json();
+          console.log(`  📂 ${workKey} returned ${edData.entries?.length ?? 0} editions`);
+          if (edData.entries?.length) {
+            const parsed = edData.entries
+              .map(e => parseEditionOL(e, oldBook))
+              .filter(e => e && e.year && e.isbn && e.isEnglish);
+            console.log(`  📂 ${workKey} after filter: ${parsed.length}`, parsed.map(e => `${e.year} (${e.isbn})`));
+            parsed.forEach(e => results.push(e));
+          }
+        } catch (err) { console.error(`❌ Editions fetch error for ${workKey}:`, err); }
+      }));
+
     } catch (err) { console.error('❌ OL search fetch error:', err); }
 
     // Deduplicate by ISBN
