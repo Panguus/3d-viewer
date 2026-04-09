@@ -967,7 +967,12 @@
 
     const authors = (info.authors || []).map(a => a.name).filter(Boolean);
     const publishers = (info.publishers || []).map(p => p.name).filter(Boolean);
-    const workKey = (info.works || [])[0]?.key || null; // e.g. "/works/OL123W"
+    const workKey = (info.works || [])[0]?.key || null;
+
+    // Extract author OL key from the author URL e.g. /authors/OL411267A
+    const authorUrl = (info.authors || [])[0]?.url || '';
+    const authorKeyMatch = authorUrl.match(/\/authors\/(OL\w+)/);
+    const authorKey = authorKeyMatch ? authorKeyMatch[1] : null;
 
     // Use cover URL directly from the API response — much more accurate than guessing by ISBN
     const coverUrl = info.cover?.large || info.cover?.medium || info.cover?.small || null;
@@ -981,6 +986,7 @@
       isbn,
       coverUrl,
       workKey,
+      authorKey,
       pageCount: info.number_of_pages || null,
       olVerified: true,
     };
@@ -1051,10 +1057,9 @@
       } catch (err) { console.error('❌ Direct edition lookup error:', err); }
     }
 
-    // Source 2: OL title+author search, then fetch editions for each work found
-    const lastName = (oldBook.authors[0] || '').split(' ').pop();
-    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=20`;
-    console.log('🔎 OL title+author search URL:', searchUrl);
+    // Source 2: OL title-only search — broader than author+title, surfaces more work keys
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&sort=new&limit=20`;
+    console.log('🔎 OL title search URL:', searchUrl);
     try {
       const res = await fetch(searchUrl);
       const data = await res.json();
@@ -1081,6 +1086,46 @@
         } catch (err) { console.error(`❌ Editions fetch error for ${workKey}:`, err); }
       }));
     } catch (err) { console.error('❌ OL search fetch error:', err); }
+
+    // Source 3: Search all works by this author on OL, filter by title match, fetch their editions
+    // This catches cases where the same book is split across multiple unlinked OL work records
+    const authorKey = oldBook.authorKey;
+    if (authorKey) {
+      console.log('👤 Fetching all works by author:', authorKey);
+      try {
+        const authorWorksUrl = `https://openlibrary.org/authors/${authorKey}/works.json?limit=50`;
+        const awRes = await fetch(authorWorksUrl);
+        const awData = await awRes.json();
+        console.log(`👤 Author works returned: ${awData.entries?.length ?? 0}`);
+
+        const titleWords = normalize(oldBook.title).split(' ').filter(w => w.length > 3);
+        const matchingWorks = (awData.entries || []).filter(w => {
+          const wTitle = normalize(w.title || '');
+          return titleWords.filter(word => wTitle.includes(word)).length >= Math.ceil(titleWords.length * 0.5);
+        });
+        console.log(`👤 Title-matching works: ${matchingWorks.length}`, matchingWorks.map(w => `${w.title} (${w.key})`));
+
+        await Promise.all(matchingWorks.slice(0, 5).map(async (work) => {
+          if (work.key === oldBook.workKey) return; // already fetched
+          try {
+            const edUrl = `https://openlibrary.org${work.key}/editions.json?limit=100`;
+            console.log(`  📂 Fetching editions for author work ${work.key}`);
+            const edRes = await fetch(edUrl);
+            const edData = await edRes.json();
+            console.log(`  📂 ${work.key} returned ${edData.entries?.length ?? 0} editions`);
+            if (edData.entries?.length) {
+              const parsed = edData.entries
+                .map(e => parseEditionOL(e, oldBook))
+                .filter(e => e && e.year && e.isbn && e.isEnglish);
+              console.log(`  📂 ${work.key} after filter: ${parsed.length}`, parsed.map(e => `${e.year} (${e.isbn})`));
+              parsed.forEach(e => results.push(e));
+            }
+          } catch (err) { console.error(`❌ Author work editions error for ${work.key}:`, err); }
+        }));
+      } catch (err) { console.error('❌ Author works fetch error:', err); }
+    } else {
+      console.log('👤 No authorKey available — skipping author works search');
+    }
 
     // Deduplicate by ISBN
     const seen = new Set();
