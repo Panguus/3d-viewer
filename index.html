@@ -1160,10 +1160,14 @@
   }
 
   async function askGeminiForLatest(originalBook, candidates) {
-    // Pre-filter obvious junk before sending to Gemini
+    // Pre-filter obvious junk and ebooks before sending to Gemini
     const cleaned = candidates.filter(c => {
-      if (c.pageCount && c.pageCount > 5000) return false; // absurd page count = bad data
-      if (c.pageCount && c.pageCount < 10) return false;   // suspiciously thin
+      if (c.pageCount && c.pageCount > 5000) return false;
+      if (c.pageCount && c.pageCount < 10) return false;
+      const pub = (c.publisher || '').toLowerCase();
+      if (pub.includes('kindle') || pub.includes('ebook') || pub.includes('e-book') || pub.includes('digital')) return false;
+      const title = (c.title || '').toLowerCase();
+      if (title.includes('kindle') || title.includes('ebook') || title.includes('e-book')) return false;
       return true;
     });
     console.log(`🧹 After junk filter: ${cleaned.length} candidates (was ${candidates.length})`);
@@ -1190,11 +1194,13 @@ ISBN: ${originalBook.isbn}
 CANDIDATE EDITIONS FROM OPEN LIBRARY:
 ${JSON.stringify(candidateList, null, 2)}
 
-Your job: from the candidates above only, identify the most recent genuine English-language edition of the same work. Rules:
+Your job: from the candidates above only, identify the most recent genuine English-language PRINT edition of the same work. Rules:
 - Ignore translations, foreign-language editions, or unrelated books
 - Ignore reprints that are not substantively new editions
+- IGNORE ebooks, Kindle editions, digital editions, or any electronic-only format — physical print only
+- Publishers like "Kindle Edition", pages of 0 or null combined with suspiciously round years are often ebooks — skip them
 - Only consider candidates in the list above — do not suggest anything from outside the list
-- If the book on shelf IS already the latest in the list, return {"latest_index": -1, "reasoning": "<one sentence>"}
+- If the book on shelf IS already the latest print edition in the list, return {"latest_index": -1, "reasoning": "<one sentence>"}
 - Otherwise return {"latest_index": <index>, "reasoning": "<one sentence>"}
 Return only valid JSON, no extra text.`;
 
