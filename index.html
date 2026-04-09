@@ -1234,13 +1234,46 @@ If the book on shelf is already the latest known edition:
       const clean = text.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(clean);
       console.log('🤖 Gemini parsed JSON:', parsed);
-      if (parsed.latest_index === -1) {
-        console.log('🤖 Gemini says: already the latest edition. Reasoning:', parsed.reasoning);
+
+      // Case 1: already the latest
+      if (parsed.source === 'none' || parsed.latest_index === -1) {
+        console.log('🤖 Gemini says: already the latest. Reasoning:', parsed.reasoning);
         return null;
       }
-      const chosen = cleaned[parsed.latest_index];
-      console.log('🤖 Gemini chose index', parsed.latest_index, '→', chosen, '| Reasoning:', parsed.reasoning);
-      return chosen || null;
+
+      // Case 2: a candidate from the list is best
+      if (parsed.source === 'candidates') {
+        const chosen = cleaned[parsed.latest_index];
+        console.log('🤖 Gemini chose candidate index', parsed.latest_index, '→', chosen, '| Reasoning:', parsed.reasoning);
+        return chosen || null;
+      }
+
+      // Case 3: Gemini knows of a newer edition not in the list — look it up on OL
+      if (parsed.source === 'knowledge' && parsed.isbn) {
+        console.log('🤖 Gemini knows of newer edition, looking up ISBN:', parsed.isbn, '| Reasoning:', parsed.reasoning);
+        setStatus('loading', `Gemini found a newer edition — looking it up…`);
+        try {
+          const knownBook = await fetchByISBN(parsed.isbn);
+          if (knownBook) {
+            console.log('🤖 Knowledge ISBN found on OL:', knownBook);
+            return knownBook;
+          }
+        } catch {}
+        // OL doesn't have it either — build a minimal book object from Gemini's data
+        console.log('🤖 OL does not have knowledge ISBN — using Gemini data directly');
+        return {
+          title: parsed.title || originalBook.title,
+          subtitle: '',
+          authors: originalBook.authors,
+          publisher: parsed.publisher || '—',
+          year: parsed.year || null,
+          isbn: parsed.isbn,
+          coverUrl: null,
+          pageCount: null,
+        };
+      }
+
+      return null;
     } catch (err) {
       console.error('❌ Gemini call failed:', err);
       setStatus('error', err.name === 'AbortError'
