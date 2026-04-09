@@ -1316,32 +1316,33 @@ Return only valid JSON, no extra text.`;
         <style>
           @page {
             size: 1in 1.5in;
-            margin: 0;
+            margin: 0mm;
           }
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body {
+          html, body {
             width: 1in;
             height: 1.5in;
+            margin: 0;
+            padding: 0;
+            background: white;
+          }
+          body {
             display: flex;
             align-items: center;
             justify-content: center;
-            background: white;
           }
           .label {
-            width: 0.9in;
-            height: 1.4in;
+            width: 0.85in;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 1pt;
           }
           .line {
             font-family: Arial, sans-serif;
-            font-size: 14pt;
+            font-size: 9pt;
             font-weight: bold;
             text-align: center;
-            line-height: 1.1;
+            line-height: 1.15;
             color: black;
             white-space: nowrap;
           }
@@ -1349,11 +1350,17 @@ Return only valid JSON, no extra text.`;
       </head>
       <body>
         <div class="label">
-          ${lccParts.map(l => `<div class="line">${l}</div>`).join('')}
+          \${lccParts.map(l => \`<div class="line">\${l}</div>\`).join('')}
         </div>
       </body>
       </html>
     `;
+
+    // Show one-time setup tip about disabling browser headers/footers
+    if (!localStorage.getItem('librascan_print_tip_shown')) {
+      alert('First time printing: When the print dialog opens, look for "More settings" and turn OFF Headers and Footers. You only need to do this once.');
+      localStorage.setItem('librascan_print_tip_shown', '1');
+    }
 
     // Open a tiny hidden iframe, write the label, and print it
     const iframe = document.createElement('iframe');
