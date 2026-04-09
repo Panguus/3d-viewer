@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://s3.amazonaws.com/download.dymo.com/dymo/Software/JavaScript/dymo.connect.framework.js"></script>
+<script src="https://127.0.0.1:41951/DYMO/DLS/Printing/JavaScript/dymo.connect.framework.js"></script>
 <style>
   :root {
     --cream: #f5f0e8;
@@ -1309,16 +1309,16 @@ Return only valid JSON, no extra text.`;
       return;
     }
     try {
-      if (typeof dymo === 'undefined' || !dymo.label || !dymo.label.framework) {
-        showToast('Dymo SDK not loaded — check internet connection.', true);
-        return;
-      }
-      const env = dymo.label.framework.checkEnvironment();
-      if (!env.isFrameworkInstalled) { showToast('Dymo Connect is not installed on this computer.', true); return; }
-      if (!env.isWebServicePresent) { showToast('Dymo Connect service is not running — please start it.', true); return; }
-      const printers = dymo.label.framework.getPrinters();
-      if (!printers.length) { showToast('No Dymo printers found.', true); return; }
-      const printer = printers.find(p => p.printerType === 'LabelWriterPrinter') || printers[0];
+      // Get printer list directly from Dymo web service REST API
+      const printersRes = await fetch('https://127.0.0.1:41951/DYMO/DLS/Printing/GetPrinters');
+      if (!printersRes.ok) throw new Error('Could not reach Dymo Web Service');
+      const printersXml = await printersRes.text();
+      const parser = new DOMParser();
+      const printerDoc = parser.parseFromString(printersXml, 'text/xml');
+      const printerName = printerDoc.querySelector('LabelWriterPrinter Name')?.textContent
+                       || printerDoc.querySelector('Printer Name')?.textContent
+                       || 'DYMO LabelWriter 450';
+      console.log('🖨 Using printer:', printerName);
       const labelXml = `<?xml version="1.0" encoding="utf-8"?>
 <DieCutLabel Version="8.0" Units="twips">
   <PaperOrientation>Portrait</PaperOrientation>
@@ -1352,8 +1352,13 @@ Return only valid JSON, no extra text.`;
     </ObjectLayout>
   </ObjectInfo>
 </DieCutLabel>`;
-      const label = dymo.label.framework.openLabelXml(labelXml);
-      label.print(printer.name);
+      // Send print job via REST API
+      const printRes = await fetch('https://127.0.0.1:41951/DYMO/DLS/Printing/PrintLabel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ printerName, labelXml, printParamsXml: '', labelSetXml: '' })
+      });
+      if (!printRes.ok) throw new Error('Print request failed');
       showToast('🖨 Label printed!');
     } catch (err) {
       console.error('Dymo print error:', err);
