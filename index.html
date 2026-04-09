@@ -1016,18 +1016,71 @@
   // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
     console.log('🔍 findLatestEdition() called for:', oldBook.title, '| ISBN:', oldBook.isbn, '| workKey:', oldBook.workKey);
-    const candidates = await gatherAllCandidates(oldBook);
+
+    // Step A: Ask Gemini what the latest edition is from its own knowledge first
+    const geminiKnowledge = await askGeminiWhatLatestEditionIs(oldBook);
+    console.log('🧠 Gemini knowledge check:', geminiKnowledge);
+
+    // Step B: Gather Open Library candidates + any ISBN Gemini suggested
+    const candidates = await gatherAllCandidates(oldBook, geminiKnowledge?.isbn);
     console.log(`📚 Total candidates after dedup: ${candidates.length}`, candidates);
+
     if (!candidates.length) {
+      // If OL has nothing but Gemini knows of a newer edition, trust Gemini
+      if (geminiKnowledge && geminiKnowledge.newer) {
+        console.log('🧠 No OL candidates but Gemini knows of a newer edition — using Gemini knowledge');
+        return geminiKnowledge.bookData || null;
+      }
       console.log('⚠️ No candidates found — returning null');
       return null;
     }
+
     const picked = await askGeminiForLatest(oldBook, candidates);
     console.log('✅ Final picked result:', picked);
     return picked || null;
   }
 
-  async function gatherAllCandidates(oldBook) {
+  async function askGeminiWhatLatestEditionIs(book) {
+    const prompt = `You are a library expert. Based solely on your training knowledge, what is the most recent published edition of this book?
+
+Title: "${book.title}"
+Author(s): ${book.authors.join(', ')}
+Current edition year: ${book.year}
+Current ISBN: ${book.isbn}
+
+If you know of a newer edition, respond with JSON:
+{"newer": true, "year": <year>, "isbn": "<isbn13 if known, else null>", "notes": "<one sentence>"}
+
+If the current edition IS the latest you know of, respond with:
+{"newer": false}
+
+Return only valid JSON, no extra text.`;
+
+    console.log('🧠 Asking Gemini for knowledge check...');
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (!res.ok) { console.error('🧠 Gemini knowledge check error:', data.error?.message); return null; }
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('🧠 Gemini knowledge raw:', text);
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      console.log('🧠 Gemini knowledge parsed:', parsed);
+      return parsed;
+    } catch (err) {
+      console.error('🧠 Gemini knowledge check failed:', err);
+      return null;
+    }
+  }
+
+  async function gatherAllCandidates(oldBook, geminiSuggestedIsbn) {
     const results = [];
 
     // Source 1: All editions under the same Work ID (from ISBN lookup)
@@ -1052,7 +1105,7 @@
 
     // Source 2: OL title+author search, then fetch editions for each work found
     const lastName = (oldBook.authors[0] || '').split(' ').pop();
-    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=10&language=eng`;
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=20`;
     console.log('🔎 OL title+author search URL:', searchUrl);
     try {
       const res = await fetch(searchUrl);
@@ -1060,19 +1113,12 @@
       console.log(`🔎 OL search returned ${data.docs?.length ?? 0} docs:`,
         data.docs?.map(d => ({ title: d.title, key: d.key, isbn_count: d.isbn?.length ?? 0, years: d.publish_year?.slice(0,5) }))
       );
-
-      // For each work doc found, fetch its editions to get real ISBNs
-      const workKeys = [...new Set(
-        (data.docs || []).map(d => d.key).filter(Boolean)
-      )].slice(0, 5); // limit to 5 works to avoid too many requests
-
+      const workKeys = [...new Set((data.docs || []).map(d => d.key).filter(Boolean))].slice(0, 10);
       console.log('🔎 Will fetch editions for work keys:', workKeys);
-
       await Promise.all(workKeys.map(async (workKey) => {
-        // Skip if it's the same work we already fetched
         if (workKey === oldBook.workKey) return;
         try {
-          const edUrl = `https://openlibrary.org${workKey}/editions.json?limit=50`;
+          const edUrl = `https://openlibrary.org${workKey}/editions.json?limit=100`;
           console.log(`  📂 Fetching editions for ${workKey}:`, edUrl);
           const edRes = await fetch(edUrl);
           const edData = await edRes.json();
@@ -1086,8 +1132,19 @@
           }
         } catch (err) { console.error(`❌ Editions fetch error for ${workKey}:`, err); }
       }));
-
     } catch (err) { console.error('❌ OL search fetch error:', err); }
+
+    // Source 3: If Gemini suggested a specific ISBN, look it up directly on OL
+    if (geminiSuggestedIsbn && geminiSuggestedIsbn !== oldBook.isbn) {
+      console.log('🧠 Looking up Gemini-suggested ISBN:', geminiSuggestedIsbn);
+      try {
+        const suggested = await fetchByISBN(geminiSuggestedIsbn);
+        if (suggested) {
+          console.log('🧠 Gemini-suggested book found:', suggested);
+          results.push({ ...suggested, isEnglish: true });
+        }
+      } catch (err) { console.error('❌ Gemini ISBN lookup error:', err); }
+    }
 
     // Deduplicate by ISBN
     const seen = new Set();
@@ -1131,19 +1188,23 @@ ISBN: ${originalBook.isbn}
 CANDIDATE EDITIONS FROM OPEN LIBRARY:
 ${JSON.stringify(candidateList, null, 2)}
 
-IMPORTANT: Open Library data is sometimes incorrect — years, page counts, and publishers can be wrong. Use your own knowledge of this book and its publication history to sanity-check the candidates. Be skeptical of:
-- Years that seem implausible given the book's known history
-- Publishers that don't match the book's known publisher
-- Entries with missing or suspicious page counts that don't match any known edition
-- ISBNs that don't correspond to any real published edition you know of
+IMPORTANT: Open Library data is sometimes incomplete or incorrect. Use your own knowledge of this book's publication history too.
 
-Your job: identify which candidate is the most recent, genuine English-language edition of the same work. Rules:
-- Ignore translations, foreign-language editions, or unrelated books
-- Ignore reprints/printings that are not substantively new editions
-- The title may have changed between editions — that is fine
-- If the book on shelf IS already the latest known edition, return {"latest_index": -1}
-- Otherwise return {"latest_index": <index>, "reasoning": "<one sentence>"}
-Return only valid JSON, no extra text.`;
+Your job:
+1. Check the candidates above for a newer genuine English-language edition of the same work
+2. ALSO use your own training knowledge — if you know a newer edition exists that is NOT in the candidates list, report it
+3. Ignore translations, foreign editions, reprints that are not substantively new editions
+
+Return ONE of these JSON formats only, no extra text:
+
+If a candidate in the list is the latest:
+{"source": "candidates", "latest_index": <index>, "reasoning": "<one sentence>"}
+
+If you know of a newer edition NOT in the list:
+{"source": "knowledge", "isbn": "<isbn13>", "title": "<title>", "year": <year>, "publisher": "<publisher>", "reasoning": "<one sentence>"}
+
+If the book on shelf is already the latest known edition:
+{"source": "none", "latest_index": -1, "reasoning": "<one sentence>"}`;
 
     console.log('🤖 Sending to Gemini — candidate count after junk filter:', candidateList.length);
     console.log('🤖 Full prompt:\n', prompt);
