@@ -584,7 +584,88 @@
   }
   #toast.show { opacity: 1; transform: translateY(0); }
 
-  @media (max-width: 700px) {
+  .btn-settings {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    color: white;
+    font-size: 1.1rem;
+    width: 38px; height: 38px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .btn-settings:hover { background: rgba(255,255,255,0.28); }
+
+  .settings-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 100;
+    backdrop-filter: blur(2px);
+  }
+  .settings-drawer {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    width: 340px;
+    max-width: 90vw;
+    z-index: 101;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+  }
+  .settings-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--green);
+    margin-bottom: 20px;
+  }
+  .settings-field label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .settings-input-row {
+    display: flex; gap: 8px;
+  }
+  .settings-input-row input {
+    flex: 1;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.82rem;
+    padding: 10px 12px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--cream);
+    color: var(--text);
+    outline: none;
+  }
+  .settings-input-row input:focus {
+    border-color: var(--green);
+    background: #fff;
+  }
+  .settings-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.4;
+  }
+  .key-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.78rem;
+    margin-top: 10px;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .key-status.set { background: #e8f5e9; color: #2e7d32; }
+  .key-status.missing { background: #fff3e0; color: #e65100; }
     header { padding: 14px 16px; }
     main { padding: 16px 12px; }
     .comparison-grid {
@@ -641,10 +722,28 @@
       <span class="num" id="stat-current">0</span>
       <span class="lbl">Up to Date</span>
     </div>
+    <button class="btn-settings" onclick="toggleSettings()" title="Settings">⚙️</button>
   </div>
 </header>
 
 
+
+<!-- SETTINGS PANEL -->
+<div id="settings-panel" style="display:none;">
+  <div class="settings-backdrop" onclick="toggleSettings()"></div>
+  <div class="settings-drawer">
+    <div class="settings-title">⚙️ Settings</div>
+    <div class="settings-field">
+      <label>Gemini API Key</label>
+      <div class="settings-input-row">
+        <input type="password" id="gemini-key-input" placeholder="AIza..." autocomplete="off">
+        <button class="btn btn-primary" style="height:40px;padding:0 16px;font-size:0.85rem;" onclick="saveGeminiKey()">Save</button>
+      </div>
+      <p class="settings-hint">Stored locally in your browser only — never in the file.</p>
+    </div>
+    <button class="btn btn-skip" style="margin-top:16px;width:100%;justify-content:center;" onclick="toggleSettings()">Close</button>
+  </div>
+</div>
 
 <main>
   <!-- SCAN PANEL -->
@@ -738,8 +837,36 @@
   let scanCooldown = false;
 
   window.addEventListener('load', () => {
+    const stored = localStorage.getItem('librascan_gemini_key');
+    if (stored) {
+      GEMINI_KEY = stored;
+      console.log('🔑 Gemini key loaded from localStorage');
+    } else {
+      setStatus('error', 'No Gemini API key set — click ⚙️ in the header to add one.');
+    }
     document.getElementById('isbn-input').focus();
   });
+
+  function toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      const input = document.getElementById('gemini-key-input');
+      input.value = GEMINI_KEY ? '••••••••••••••••' : '';
+      input.placeholder = GEMINI_KEY ? 'Key already set — paste new one to replace' : 'AIza...';
+    }
+  }
+
+  function saveGeminiKey() {
+    const val = document.getElementById('gemini-key-input').value.trim();
+    if (!val || val.startsWith('•')) { showToast('Paste a valid API key first.', true); return; }
+    GEMINI_KEY = val;
+    localStorage.setItem('librascan_gemini_key', val);
+    toggleSettings();
+    setStatus('idle', 'Ready — scan a barcode or type an ISBN and press Look Up.');
+    showToast('✅ Gemini key saved securely in your browser.');
+  }
 
   // ─── ISBN INPUT (keyboard / USB scanner) ─────────────────────────────────
   document.getElementById('isbn-input').addEventListener('keydown', (e) => {
@@ -809,6 +936,11 @@
     } catch { return null; }
   }
   async function lookupISBN() {
+    if (!GEMINI_KEY) {
+      setStatus('error', 'No Gemini API key set — click ⚙️ in the header to add one.');
+      toggleSettings();
+      return;
+    }
     const raw = document.getElementById('isbn-input').value.trim().replace(/[-\s]/g, '');
     if (!raw) { setStatus('error', 'Please enter or scan an ISBN.'); return; }
 
@@ -892,7 +1024,7 @@
     };
   }
 
-  const GEMINI_KEY = 'AIzaSyDLs3Z0Cgz2A_Vaq2LJZvNFKzvhRpkgk3c';
+  let GEMINI_KEY = '';
 
   // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
@@ -1042,6 +1174,13 @@ Return only valid JSON, no extra text.`;
       const data = await res.json();
       console.log('🤖 Gemini raw HTTP status:', res.status);
       console.log('🤖 Gemini full response:', JSON.stringify(data, null, 2));
+
+      if (!res.ok) {
+        const msg = data.error?.message || `HTTP ${res.status}`;
+        console.error('❌ Gemini API error:', msg);
+        setStatus('error', `Gemini error: ${msg}`);
+        return null;
+      }
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       console.log('🤖 Gemini text output:', text);
       const clean = text.replace(/```json|```/g, '').trim();
