@@ -1025,7 +1025,30 @@
         }
       } catch (err) { console.error('❌ Work editions fetch error:', err); }
     } else {
-      console.warn('⚠️ oldBook has no workKey — skipping Work ID lookup');
+      // No workKey from api/books — try fetching the edition record directly to get one
+      console.warn('⚠️ oldBook has no workKey — trying direct edition lookup');
+      try {
+        const editionRes = await fetch(`https://openlibrary.org/isbn/${oldBook.isbn}.json`);
+        if (editionRes.ok) {
+          const editionData = await editionRes.json();
+          const directWorkKey = (editionData.works || [])[0]?.key || null;
+          console.log('📖 Direct edition lookup workKey:', directWorkKey);
+          if (directWorkKey) {
+            oldBook.workKey = directWorkKey; // save for use in search dedup
+            const url = `https://openlibrary.org${directWorkKey}/editions.json?limit=100`;
+            const wRes = await fetch(url);
+            const wData = await wRes.json();
+            console.log(`📖 Direct work editions returned: ${wData.entries?.length ?? 0}`);
+            if (wData.entries?.length) {
+              const parsed = wData.entries
+                .map(e => parseEditionOL(e, oldBook))
+                .filter(e => e && e.year && e.isbn && e.isEnglish);
+              console.log(`📖 After filtering: ${parsed.length}`, parsed.map(e => `${e.year} (${e.isbn})`));
+              parsed.forEach(e => results.push(e));
+            }
+          }
+        }
+      } catch (err) { console.error('❌ Direct edition lookup error:', err); }
     }
 
     // Source 2: OL title+author search, then fetch editions for each work found
