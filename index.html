@@ -796,7 +796,7 @@
         return;
       }
       currentOldBook = oldBook;
-      setStatus('loading', `Found "${oldBook.title}" — searching for latest edition…`);
+      setStatus('loading', `Found "${oldBook.title}" — asking Gemini to find the latest edition…`);
 
       const [newBook, oldCover] = await Promise.all([
         findLatestEdition(oldBook),
@@ -862,69 +862,122 @@
     };
   }
 
-  // ── Step 2: Find the latest edition using Work ID, with search fallback ──
+  const GEMINI_KEY = 'AIzaSyDLs3Z0Cgz2A_Vaq2LJZvNFKzvhRpkgk3c';
+
+  // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
-    let best = null;
+    const candidates = await gatherAllCandidates(oldBook);
+    if (!candidates.length) return null;
 
-    // Primary: fetch all editions under the same Work ID
-    if (oldBook.workKey) {
-      const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.entries?.length) {
-        const editions = data.entries
-          .map(e => parseEditionOL(e, oldBook))
-          .filter(e => e && e.year && e.isbn && e.isEnglish);
-        if (editions.length) {
-          editions.sort((a, b) => b.year - a.year);
-          best = editions[0];
-        }
-      }
-    }
-
-    // Fallback: if nothing newer found via Work ID, search OL by title + author.
-    // This catches cases where a new edition got a different Work ID (e.g. author lineup changed).
-    const bestYear = best?.year || oldBook.year || 0;
-    const fallback = await searchLatestByTitleAuthor(oldBook);
-    if (fallback && fallback.year && fallback.year > bestYear && fallback.isbn !== oldBook.isbn) {
-      best = fallback;
-    }
-
-    return best;
+    // Let Gemini sort through the noise
+    const picked = await askGeminiForLatest(oldBook, candidates);
+    return picked || null;
   }
 
-  async function searchLatestByTitleAuthor(oldBook) {
-    const lastName = (oldBook.authors[0] || '').split(' ').pop();
-    const titleQuery = encodeURIComponent(oldBook.title);
-    const authorQuery = encodeURIComponent(lastName);
-    const url = `https://openlibrary.org/search.json?title=${titleQuery}&author=${authorQuery}&sort=new&limit=10&language=eng`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.docs?.length) return null;
+  async function gatherAllCandidates(oldBook) {
+    const results = [];
 
-    // Pick the doc with the highest publish year that has an ISBN
-    const candidates = data.docs
-      .filter(d => d.isbn?.length && d.publish_year?.length)
-      .map(d => {
-        const year = Math.max(...d.publish_year);
-        const isbn = d.isbn.find(i => i.length === 13) || d.isbn[0];
-        const coverId = d.cover_i;
-        return {
-          title: d.title || oldBook.title,
-          subtitle: d.subtitle || '',
-          authors: (d.author_name || oldBook.authors),
-          publisher: (d.publisher?.[0]) || oldBook.publisher,
-          year,
-          isbn,
-          coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null,
-          pageCount: d.number_of_pages_median || null,
-          isEnglish: true,
-        };
+    // Source 1: All editions under the same Work ID
+    if (oldBook.workKey) {
+      try {
+        const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.entries?.length) {
+          data.entries
+            .map(e => parseEditionOL(e, oldBook))
+            .filter(e => e && e.year && e.isbn && e.isEnglish)
+            .forEach(e => results.push(e));
+        }
+      } catch {}
+    }
+
+    // Source 2: Open Library title+author search (catches different Work IDs)
+    try {
+      const lastName = (oldBook.authors[0] || '').split(' ').pop();
+      const url = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=15&language=eng`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.docs?.length) {
+        data.docs
+          .filter(d => d.isbn?.length && d.publish_year?.length)
+          .forEach(d => {
+            const year = Math.max(...d.publish_year);
+            const isbn = d.isbn.find(i => i.length === 13) || d.isbn[0];
+            const coverId = d.cover_i;
+            results.push({
+              title: d.title || oldBook.title,
+              subtitle: d.subtitle || '',
+              authors: d.author_name || oldBook.authors,
+              publisher: d.publisher?.[0] || oldBook.publisher,
+              year,
+              isbn,
+              coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null,
+              pageCount: d.number_of_pages_median || null,
+              isEnglish: true,
+            });
+          });
+      }
+    } catch {}
+
+    // Deduplicate by ISBN
+    const seen = new Set();
+    return results.filter(r => {
+      if (seen.has(r.isbn)) return false;
+      seen.add(r.isbn);
+      return true;
+    });
+  }
+
+  async function askGeminiForLatest(originalBook, candidates) {
+    const candidateList = candidates.map((c, i) => ({
+      index: i,
+      isbn: c.isbn,
+      title: c.title,
+      authors: c.authors,
+      publisher: c.publisher,
+      year: c.year,
+      pages: c.pageCount,
+    }));
+
+    const prompt = `You are a library cataloguing expert. A library has a book on its shelf and needs to know if a newer edition exists.
+
+BOOK ON SHELF:
+Title: "${originalBook.title}"
+Authors: ${originalBook.authors.join(', ')}
+Year: ${originalBook.year}
+ISBN: ${originalBook.isbn}
+
+CANDIDATE EDITIONS FROM OPEN LIBRARY:
+${JSON.stringify(candidateList, null, 2)}
+
+Your job: identify which candidate is the most recent, genuine English-language edition of the same work as the book on shelf. Rules:
+- Ignore translations, foreign-language editions, or unrelated books
+- Ignore reprints/printings that are not new editions (same content, different year)
+- The title may have changed between editions — that is fine as long as it is the same work
+- If the book on shelf IS already the latest, return {"latest_index": -1}
+- Otherwise return {"latest_index": <index of the best candidate>}
+Return only valid JSON, no explanation.`;
+
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
-
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.year - a.year);
-    return candidates[0];
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      if (parsed.latest_index === -1) return null; // already latest
+      const chosen = candidates[parsed.latest_index];
+      return chosen || null;
+    } catch (err) {
+      console.error('Gemini error:', err);
+      // Fallback: just return the newest by year if Gemini fails
+      const sorted = [...candidates].sort((a, b) => b.year - a.year);
+      return sorted[0] || null;
+    }
   }
 
   function parseEditionOL(entry, workBook) {
