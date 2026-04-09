@@ -395,7 +395,25 @@
   }
   .book-meta { font-size: 0.82rem; color: var(--text-muted); line-height: 1.7; }
   .book-meta strong { color: var(--text); font-weight: 700; }
-  .isbn-tag {
+  .lcc-tag {
+    display: inline-block;
+    background: #e8f0fe;
+    border: 1px solid #a8c4f8;
+    border-radius: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 3px 8px;
+    margin-top: 6px;
+    color: #1a3a6b;
+    word-break: break-all;
+  }
+  .lcc-missing {
+    background: var(--cream-dark);
+    border-color: var(--border);
+    color: var(--text-muted);
+    font-family: 'Lato', sans-serif;
+    font-style: italic;
+  }
     display: inline-block;
     background: var(--cream-dark);
     border: 1px solid var(--border);
@@ -804,10 +822,12 @@
             <th>Old ISBN</th>
             <th>Old Title</th>
             <th>Old Year</th>
+            <th>Old LCC</th>
             <th></th>
             <th>New ISBN</th>
             <th>New Title</th>
             <th>New Year</th>
+            <th>New LCC</th>
             <th>Author</th>
             <th>Status</th>
             <th></th>
@@ -988,6 +1008,7 @@
       workKey,
       authorKey,
       pageCount: info.number_of_pages || null,
+      lcc: (info.classifications?.lc_classifications || [])[0] || null,
       olVerified: true,
     };
   }
@@ -1253,12 +1274,100 @@ Return only valid JSON, no extra text.`;
       isbn,
       coverUrl,
       pageCount: entry.number_of_pages || null,
+      lcc: (entry.lc_classifications || [])[0] || null,
       isEnglish,
       olVerified: true,
     };
   }
 
-  function normalize(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
+  function formatLCC(lcc) {
+    if (!lcc) return null;
+    // Split LCC into spine label lines:
+    // e.g. "QA76.73.P98 L877 2008" → ["QA", "76.73", ".P98", "L877", "2008"]
+    const parts = [];
+    // Match the class letters (QA), then number (76.73), then cutter (.P98), then rest
+    const match = lcc.match(/^([A-Z]+)(\d+(?:\.\d+)?)?((?:\.[A-Z]\d+)+)?\s*(.*)$/);
+    if (match) {
+      if (match[1]) parts.push(match[1]);
+      if (match[2]) parts.push(match[2]);
+      // Split cutter segments: .P98.L24 → ['.P98', '.L24']
+      if (match[3]) match[3].match(/\.[A-Z]\d+/g)?.forEach(c => parts.push(c));
+      // Remaining: could be "L877 2008" → split on spaces
+      if (match[4]) match[4].trim().split(/\s+/).forEach(p => { if (p) parts.push(p); });
+    } else {
+      // Fallback: just split on spaces
+      lcc.split(/\s+/).forEach(p => { if (p) parts.push(p); });
+    }
+    return parts;
+  }
+
+  async function printDymoLabel(book) {
+    const lccParts = formatLCC(book.lcc);
+    if (!lccParts || !lccParts.length) {
+      showToast('No LCC call number available for this edition.', true);
+      return;
+    }
+
+    // Build label XML for Dymo LabelWriter 450 — 30347 1"x1.5" label
+    // Each LCC line gets its own text object stacked vertically
+    const lineHeight = 90;
+    const startY = 20;
+    const labelXml = `<?xml version="1.0" encoding="utf-8"?>
+<DieCutLabel Version="8.0" Units="twips">
+  <PaperOrientation>Portrait</PaperOrientation>
+  <Id>Address</Id>
+  <PaperName>30347 1 in x 1-1/2 in</PaperName>
+  <DrawCommands>
+    <RoundRectangle X="0" Y="0" Width="1440" Height="2160" Rx="180" Ry="180"/>
+  </DrawCommands>
+  <ObjectInfo>
+    <TextObject>
+      <Name>TEXT</Name>
+      <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
+      <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
+      <LinkedObjectName/>
+      <Rotation>Rotation0</Rotation>
+      <IsMirrored>False</IsMirrored>
+      <IsVariable>False</IsVariable>
+      <HorizontalAlignment>Center</HorizontalAlignment>
+      <VerticalAlignment>Top</VerticalAlignment>
+      <TextFitMode>ShrinkToFit</TextFitMode>
+      <UseFullFontHeight>True</UseFullFontHeight>
+      <Verticalized>False</Verticalized>
+      <StyledText>
+        ${lccParts.map(line => `<Element><String>${escHtml(line)}</String><Attributes><Font Family="Arial" Size="12" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element><Element><String>&#13;</String><Attributes><Font Family="Arial" Size="12" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element>`).join('')}
+      </StyledText>
+    </TextObject>
+    <ObjectLayout>
+      <DYMOPoint><X>72</X><Y>72</Y></DYMOPoint>
+      <Size><Width>1296</Width><Height>2016</Height></Size>
+      <ZOrder>0</ZOrder>
+    </ObjectLayout>
+  </ObjectInfo>
+</DieCutLabel>`;
+
+    try {
+      // Dymo Connect local service endpoint
+      const statusRes = await fetch('http://localhost:41951/DYMO/DLS/Printing/StatusConnected');
+      if (!statusRes.ok) throw new Error('Dymo Connect not responding');
+
+      const printRes = await fetch('http://localhost:41951/DYMO/DLS/Printing/PrintLabel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          printerName: 'DYMO LabelWriter 450',
+          labelXml: labelXml,
+          printParamsXml: '',
+          labelSetXml: '',
+        })
+      });
+      if (!printRes.ok) throw new Error('Print request failed');
+      showToast('🖨 Label printed!');
+    } catch (err) {
+      console.error('Dymo print error:', err);
+      showToast('Could not reach Dymo Connect — is it running?', true);
+    }
+  }
 
   function renderComparison(oldBook, newBook) {
     const isSameEdition = newBook.isbn === oldBook.isbn;
@@ -1302,6 +1411,10 @@ Return only valid JSON, no extra text.`;
       badge = `<div class="latest-badge">✦ Newer Edition — ${book.year}</div>`;
     }
 
+    const lccDisplay = book.lcc
+      ? `<div class="lcc-tag">📋 ${escHtml(book.lcc)}</div>`
+      : `<div class="lcc-tag lcc-missing">📋 No LCC on file</div>`;
+
     return `
       ${topBanner}
       <div class="cover-wrap">${cover}</div>
@@ -1313,6 +1426,7 @@ Return only valid JSON, no extra text.`;
         ${book.pageCount ? `<br><strong>Pages:</strong> ${book.pageCount}` : ''}
       </div>
       <div class="isbn-tag">${book.isbn}</div>
+      ${lccDisplay}
       ${badge}
     `;
   }
@@ -1333,9 +1447,11 @@ Return only valid JSON, no extra text.`;
       oldIsbn: currentOldBook.isbn,
       oldTitle: currentOldBook.title,
       oldYear: currentOldBook.year || '—',
+      oldLcc: currentOldBook.lcc || '—',
       newIsbn: currentNewBook.isbn,
       newTitle: currentNewBook.title,
       newYear: currentNewBook.year || '—',
+      newLcc: currentNewBook.lcc || '—',
       author: (currentOldBook.authors || []).join(', '),
       status: currentNewBook.isbn !== currentOldBook.isbn ? 'Needs Update' : 'Up to Date'
     };
@@ -1347,6 +1463,9 @@ Return only valid JSON, no extra text.`;
     document.getElementById('isbn-input').focus();
     setStatus('idle', 'Book logged! Ready for next scan.');
     showToast('✅ Added to log!');
+
+    // Auto-print label for the new edition's LCC
+    printDymoLabel(currentNewBook);
   }
 
   function markAsSame() {
@@ -1374,12 +1493,14 @@ Return only valid JSON, no extra text.`;
     tr.innerHTML = `
       <td style="color:var(--text-muted);font-size:0.75rem;">${entry.num}</td>
       <td class="mono">${entry.oldIsbn}</td>
-      <td style="max-width:180px;">${escHtml(entry.oldTitle)}</td>
+      <td style="max-width:160px;">${escHtml(entry.oldTitle)}</td>
       <td style="text-align:center;">${entry.oldYear}</td>
+      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;">${entry.oldLcc}</td>
       <td class="update-arrow" style="text-align:center;">→</td>
       <td class="mono">${entry.newIsbn}</td>
-      <td style="max-width:180px;">${escHtml(entry.newTitle)}</td>
+      <td style="max-width:160px;">${escHtml(entry.newTitle)}</td>
       <td style="text-align:center;">${entry.newYear}</td>
+      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;">${entry.newLcc}</td>
       <td style="color:var(--text-muted);font-size:0.8rem;">${escHtml(entry.author)}</td>
       <td>${statusBadge}</td>
       <td><button class="btn-row-del" onclick="deleteRow(${entry.num})">✕</button></td>
@@ -1432,15 +1553,20 @@ Return only valid JSON, no extra text.`;
     if (!logEntries.length) { showToast('Nothing to export yet!', true); return; }
 
     const rows = [
-      ['#', 'Old ISBN', 'Old Title', 'Old Year', 'New ISBN', 'New Title', 'New Year', 'Author', 'Status', 'Date Scanned'],
+      ['#', 'Old ISBN', 'Old Title', 'Old Year', 'Old LCC', 'New ISBN', 'New Title', 'New Year', 'New LCC', 'Author', 'Status', 'Date Scanned'],
       ...logEntries.map(e => [
-        e.num, e.oldIsbn, e.oldTitle, e.oldYear,
-        e.newIsbn, e.newTitle, e.newYear,
+        e.num, e.oldIsbn, e.oldTitle, e.oldYear, e.oldLcc,
+        e.newIsbn, e.newTitle, e.newYear, e.newLcc,
         e.author, e.status, new Date().toLocaleDateString()
       ])
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      {wch:4},{wch:16},{wch:32},{wch:8},{wch:24},
+      {wch:16},{wch:32},{wch:8},{wch:24},
+      {wch:24},{wch:14},{wch:14}
+    ];
 
     // Column widths
     ws['!cols'] = [
