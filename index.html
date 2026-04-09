@@ -909,20 +909,6 @@
     document.getElementById('isbn-input').classList.remove('scanning-active');
   }
 
-  const GB_KEY = 'AIzaSyAf8cXobj58Ek2z9HA8goz_CorHjZSVVo8';
-
-  async function fetchCoverFromGB(isbn) {
-    try {
-      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${GB_KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.items || !data.items.length) return null;
-      const links = data.items[0].volumeInfo?.imageLinks;
-      if (!links) return null;
-      const raw = links.large || links.medium || links.thumbnail || links.smallThumbnail || null;
-      return raw ? raw.replace('http://', 'https://').replace('&edge=curl', '') : null;
-    } catch { return null; }
-  }
   async function lookupISBN() {
     if (!GEMINI_KEY) {
       setStatus('error', 'No Gemini API key set — paste your key in the field above and hit Save.');
@@ -945,21 +931,9 @@
       currentOldBook = oldBook;
       setStatus('loading', `Found "${oldBook.title}" — asking Gemini to find the latest edition…`);
 
-      const [newBook, oldCover] = await Promise.all([
-        findLatestEdition(oldBook),
-        fetchCoverFromGB(oldBook.isbn)
-      ]);
-
-      if (oldCover) oldBook.coverUrl = oldCover;
-
+      const newBook = await findLatestEdition(oldBook);
       const best = (newBook && newBook.isbn !== oldBook.isbn) ? newBook : oldBook;
       currentNewBook = best;
-
-      // Fetch new book cover from GB if it's a different edition
-      if (best.isbn !== oldBook.isbn) {
-        const newCover = await fetchCoverFromGB(best.isbn);
-        if (newCover) best.coverUrl = newCover;
-      }
 
       renderComparison(oldBook, currentNewBook);
       setStatus('success', `Found! Compare below and add to your log.`);
@@ -1008,6 +982,7 @@
       coverUrl,
       workKey,
       pageCount: info.number_of_pages || null,
+      olVerified: true,
     };
   }
 
@@ -1307,13 +1282,14 @@ If the book on shelf is already the latest known edition:
     return {
       title: entry.title || workBook.title,
       subtitle: entry.subtitle || '',
-      authors: workBook.authors, // reuse from the work — editions don't repeat author names
+      authors: workBook.authors,
       publisher: publishers,
       year,
       isbn,
       coverUrl,
       pageCount: entry.number_of_pages || null,
       isEnglish,
+      olVerified: true,
     };
   }
 
