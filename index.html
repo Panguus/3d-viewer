@@ -1464,8 +1464,8 @@ Return only valid JSON, no extra text.`;
     setStatus('idle', 'Book logged! Ready for next scan.');
     showToast('✅ Added to log!');
 
-    // Auto-print label for the new edition's LCC
-    printDymoLabel(currentNewBook);
+    // Auto-print label for the current book's LCC
+    printDymoLabel(currentOldBook);
   }
 
   function markAsSame() {
