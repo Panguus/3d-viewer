@@ -1,78 +1,1014 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Model Viewer</title>
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
-        #viewer { width: 100%; height: 100vh; display: block; }
-        canvas { display: block; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LibraScan — Library Edition Updater</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --cream: #f5f0e8;
+    --cream-dark: #ede7d9;
+    --green: #2d5016;
+    --green-mid: #3d6b20;
+    --green-light: #5a8f32;
+    --gold: #b8860b;
+    --gold-light: #d4a017;
+    --brown: #6b4c2a;
+    --text: #1a1a1a;
+    --text-muted: #6b6454;
+    --border: #c8bfaa;
+    --shadow: rgba(45, 80, 22, 0.15);
+    --card-bg: #fffdf7;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Lato', sans-serif;
+    background-color: var(--cream);
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(45,80,22,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(184,134,11,0.05) 0%, transparent 50%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--green);
+    background-image: linear-gradient(135deg, #1e3a0d 0%, var(--green) 40%, #3d6b20 100%);
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    top: -30px; right: -30px;
+    width: 200px; height: 200px;
+    border: 40px solid rgba(184,134,11,0.15);
+    border-radius: 50%;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -50px; left: 30%;
+    width: 300px; height: 100px;
+    border: 30px solid rgba(255,255,255,0.04);
+    border-radius: 50%;
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo-icon {
+    width: 48px; height: 48px;
+    background: var(--gold);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .logo-text h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.8rem;
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .logo-text p {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 300;
+  }
+  .header-stats {
+    display: flex; gap: 24px;
+    position: relative; z-index: 1;
+  }
+  .stat-pill {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 6px 16px;
+    text-align: center;
+    backdrop-filter: blur(4px);
+  }
+  .stat-pill .num {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.3rem;
+    color: var(--gold-light);
+    font-weight: 500;
+    display: block;
+    line-height: 1;
+  }
+  .stat-pill .lbl {
+    font-size: 0.68rem;
+    color: rgba(255,255,255,0.55);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+
+  /* API KEY BANNER */
+
+
+  /* MAIN LAYOUT */
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* SCAN PANEL */
+  .scan-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    box-shadow: 0 4px 24px var(--shadow);
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .scan-panel::before {
+    content: '📚';
+    position: absolute;
+    right: 24px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 80px;
+    opacity: 0.06;
+    pointer-events: none;
+  }
+  .panel-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    color: var(--green);
+    font-weight: 600;
+    margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::before {
+    content: '';
+    display: block; width: 4px; height: 20px;
+    background: var(--gold);
+    border-radius: 2px;
+  }
+  .input-row {
+    display: flex; gap: 12px; align-items: center;
+    flex-wrap: wrap;
+  }
+  .isbn-input-wrap {
+    position: relative; flex: 1; min-width: 240px;
+  }
+  .isbn-input-wrap label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  #isbn-input {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 1.1rem;
+    padding: 12px 16px;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    letter-spacing: 1px;
+  }
+  #isbn-input:focus {
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px rgba(45,80,22,0.1);
+    background: #fff;
+  }
+  #isbn-input.scanning-active {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(184,134,11,0.15);
+    animation: pulse-border 1.5s ease infinite;
+  }
+  @keyframes pulse-border {
+    0%,100% { box-shadow: 0 0 0 3px rgba(184,134,11,0.15); }
+    50% { box-shadow: 0 0 0 6px rgba(184,134,11,0.08); }
+  }
+  .btn {
+    border: none; border-radius: 10px;
+    font-family: 'Lato', sans-serif;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, background 0.2s;
+    display: flex; align-items: center; gap: 8px;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--green);
+    color: white;
+    padding: 12px 24px;
+    font-size: 0.92rem;
+    box-shadow: 0 3px 12px rgba(45,80,22,0.3);
+    align-self: flex-end;
+    height: 46px;
+  }
+  .btn-primary:hover { background: var(--green-mid); box-shadow: 0 5px 16px rgba(45,80,22,0.4); }
+  .btn-camera {
+    background: var(--cream-dark);
+    color: var(--green);
+    border: 2px solid var(--border);
+    padding: 10px 18px;
+    font-size: 0.88rem;
+    align-self: flex-end;
+    height: 46px;
+  }
+  .btn-camera:hover { background: var(--border); }
+  .btn-camera.active {
+    background: var(--gold-light);
+    color: white;
+    border-color: var(--gold);
+  }
+
+  /* SCANNER VIDEO */
+  #reader-container {
+    display: none;
+    margin-top: 20px;
+    border: 2px dashed var(--gold);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    position: relative;
+  }
+  #reader { width: 100%; max-height: 280px; }
+  .scanner-overlay-text {
+    position: absolute;
+    bottom: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 0.78rem;
+    padding: 4px 12px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* STATUS */
+  #status-bar {
+    margin-top: 14px;
+    min-height: 28px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.88rem;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-idle .status-dot { background: var(--border); }
+  .status-loading .status-dot { background: var(--gold); animation: blink 0.8s ease infinite; }
+  .status-success .status-dot { background: #4caf50; }
+  .status-error .status-dot { background: #e53935; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .status-loading .status-msg { color: var(--gold); }
+  .status-success .status-msg { color: var(--green); }
+  .status-error .status-msg { color: #c62828; }
+
+  /* BOOK COMPARISON */
+  #comparison {
+    display: none;
+    margin-bottom: 28px;
+  }
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .arrow-divider {
+    display: flex; align-items: center; justify-content: center;
+    padding-top: 80px;
+    color: var(--gold);
+    font-size: 2rem;
+  }
+  .book-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px var(--shadow);
+    transition: transform 0.2s;
+    animation: slideUp 0.4s ease both;
+  }
+  .book-card:hover { transform: translateY(-2px); }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .book-card.new-card { animation-delay: 0.1s; }
+  .card-header {
+    padding: 10px 16px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+  }
+  .card-header.old { background: var(--cream-dark); color: var(--text-muted); }
+  .card-header.new { background: var(--green); color: rgba(255,255,255,0.85); }
+  .card-body { padding: 20px; }
+  .cover-wrap {
+    display: flex; justify-content: center;
+    margin-bottom: 16px;
+  }
+  .book-cover {
+    width: 100px; height: 140px;
+    object-fit: cover;
+    border-radius: 4px;
+    box-shadow: 4px 4px 16px rgba(0,0,0,0.25);
+    border: 1px solid var(--border);
+  }
+  .no-cover {
+    width: 100px; height: 140px;
+    background: var(--cream-dark);
+    border: 2px dashed var(--border);
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-align: center;
+    padding: 8px;
+  }
+  .book-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+    margin-bottom: 6px;
+  }
+  .book-meta { font-size: 0.82rem; color: var(--text-muted); line-height: 1.7; }
+  .book-meta strong { color: var(--text); font-weight: 700; }
+  .isbn-tag {
+    display: inline-block;
+    background: var(--cream-dark);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    margin-top: 8px;
+    color: var(--brown);
+  }
+  .latest-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: linear-gradient(90deg, #2d5016, #5a8f32);
+    color: white;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-top: 10px;
+  }
+
+  /* ACTION ROW */
+  .action-row {
+    display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap;
+  }
+  .btn-add {
+    background: linear-gradient(135deg, var(--green), var(--green-light));
+    color: white;
+    padding: 13px 28px;
+    font-size: 0.95rem;
+    box-shadow: 0 4px 14px rgba(45,80,22,0.35);
+    flex: 1;
+  }
+  .btn-add:hover { box-shadow: 0 6px 20px rgba(45,80,22,0.45); }
+  .btn-skip {
+    background: var(--cream-dark);
+    color: var(--text-muted);
+    border: 2px solid var(--border);
+    padding: 13px 20px;
+    font-size: 0.88rem;
+  }
+  .btn-skip:hover { background: var(--border); }
+
+  /* LOG TABLE */
+  .log-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px var(--shadow);
+  }
+  .log-header {
+    padding: 18px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, rgba(45,80,22,0.04), transparent);
+  }
+  .log-header-left {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .log-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    color: var(--green);
+    font-weight: 600;
+  }
+  .count-badge {
+    background: var(--green);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-family: 'DM Mono', monospace;
+  }
+  .btn-export {
+    background: linear-gradient(135deg, #1a6b2a, #2d9e45);
+    color: white;
+    padding: 9px 20px;
+    font-size: 0.85rem;
+    box-shadow: 0 3px 10px rgba(26,107,42,0.3);
+    border-radius: 8px;
+  }
+  .btn-export:hover { box-shadow: 0 5px 14px rgba(26,107,42,0.45); }
+  .btn-clear {
+    background: transparent;
+    color: #c62828;
+    border: 1px solid #e57373;
+    padding: 9px 16px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+  }
+  .btn-clear:hover { background: #ffebee; }
+
+  #log-empty {
+    padding: 48px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  #log-empty .empty-icon { font-size: 3rem; margin-bottom: 10px; opacity: 0.4; }
+  #log-empty p { font-size: 0.9rem; }
+
+  .log-table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.83rem;
+  }
+  thead th {
+    background: var(--cream-dark);
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 700;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr {
+    border-bottom: 1px solid rgba(200,191,170,0.4);
+    transition: background 0.15s;
+  }
+  tbody tr:hover { background: rgba(45,80,22,0.03); }
+  tbody td {
+    padding: 10px 14px;
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .mono { font-family: 'DM Mono', monospace; font-size: 0.78rem; color: var(--brown); }
+  .update-arrow { color: var(--gold); font-weight: 700; }
+  .same-edition {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #e8f5e9;
+    color: #2e7d32;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .needs-update {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #fff3e0;
+    color: #e65100;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .btn-row-del {
+    background: none; border: none;
+    color: #ccc; font-size: 1rem;
+    cursor: pointer; padding: 2px 6px;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
+  }
+  .btn-row-del:hover { color: #c62828; background: #ffebee; }
+
+  /* TOAST */
+  #toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--green);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+    z-index: 9999;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+
+  @media (max-width: 700px) {
+    header { padding: 14px 16px; }
+    main { padding: 16px 12px; }
+    .comparison-grid { grid-template-columns: 1fr; }
+    .arrow-divider { padding-top: 0; font-size: 1.5rem; transform: rotate(90deg); }
+    .header-stats { display: none; }
+    .scan-panel { padding: 18px 16px; }
+  }
+</style>
 </head>
 <body>
-    <div id="viewer"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js"></script>
-    <script>
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById('viewer').appendChild(renderer.domElement);
 
-        // Initialize OrbitControls first
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.update();
+<header>
+  <div class="header-left">
+    <div class="logo-icon">📖</div>
+    <div class="logo-text">
+      <h1>LibraScan</h1>
+      <p>Library Edition Updater</p>
+    </div>
+  </div>
+  <div class="header-stats">
+    <div class="stat-pill">
+      <span class="num" id="stat-scanned">0</span>
+      <span class="lbl">Scanned</span>
+    </div>
+    <div class="stat-pill">
+      <span class="num" id="stat-updates">0</span>
+      <span class="lbl">Updates Found</span>
+    </div>
+    <div class="stat-pill">
+      <span class="num" id="stat-current">0</span>
+      <span class="lbl">Up to Date</span>
+    </div>
+  </div>
+</header>
 
-        // Add Lights
-        const pointLight = new THREE.PointLight(0xffffff, 1);
-        pointLight.position.set(50, 50, 50);
-        scene.add(pointLight);
 
-        const ambientLight = new THREE.AmbientLight(0x404040);  // Soft white light
-        scene.add(ambientLight);
 
-        // Load the .obj file
-        const objLoader = new THREE.OBJLoader();
-        objLoader.setPath('https://my-3d-model-bucket.s3.us-east-2.amazonaws.com/Client1Test/');
-        objLoader.load('Test01.obj', function (object) {
-            console.log('Model loaded:', object);
+<main>
+  <!-- SCAN PANEL -->
+  <div class="scan-panel">
+    <div class="panel-title">Scan or Enter ISBN</div>
+    <div class="input-row">
+      <div class="isbn-input-wrap">
+        <label for="isbn-input">ISBN / Barcode — Scanner ready, just scan!</label>
+        <input type="text" id="isbn-input" placeholder="e.g. 9780134685991" autocomplete="off" inputmode="numeric">
+      </div>
+      <button class="btn btn-primary" onclick="lookupISBN()">🔍 Look Up</button>
+      <button class="btn btn-camera" id="camera-btn" onclick="toggleCamera()">📷 Camera Scan</button>
+    </div>
+    <div id="reader-container">
+      <div id="reader"></div>
+      <div class="scanner-overlay-text">Point camera at barcode — hold steady</div>
+    </div>
+    <div id="status-bar" class="status-idle">
+      <div class="status-dot"></div>
+      <span class="status-msg">Ready — scan a barcode or type an ISBN and press Look Up.</span>
+    </div>
+  </div>
 
-            object.position.set(0, 0, 0);  // Center the model
-            object.scale.set(1, 1, 1);  // Adjust scale if needed
-            object.visible = true;
+  <!-- BOOK COMPARISON -->
+  <div id="comparison">
+    <div class="comparison-grid">
+      <div class="book-card" id="card-old">
+        <div class="card-header old">📦 Current Book on Shelf</div>
+        <div class="card-body" id="old-body"></div>
+      </div>
+      <div class="arrow-divider">→</div>
+      <div class="book-card new-card" id="card-new">
+        <div class="card-header new">✨ Latest Edition Found</div>
+        <div class="card-body" id="new-body"></div>
+      </div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-add" onclick="addToLog()">✅ Add to Log &amp; Scan Next</button>
+      <button class="btn btn-skip" onclick="skipEntry()">⏭ Skip This Book</button>
+    </div>
+  </div>
 
-            // Add bounding box to visualize the model
-            const box = new THREE.BoxHelper(object, 0xff0000);
-            scene.add(box);
+  <!-- LOG -->
+  <div class="log-section">
+    <div class="log-header">
+      <div class="log-header-left">
+        <span class="log-title">Scan Log</span>
+        <span class="count-badge" id="log-count">0 entries</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-clear" onclick="clearLog()">🗑 Clear</button>
+        <button class="btn btn-export" onclick="exportExcel()">📥 Download Excel</button>
+      </div>
+    </div>
+    <div id="log-empty">
+      <div class="empty-icon">📋</div>
+      <p>No books logged yet. Start scanning to build your list!</p>
+    </div>
+    <div class="log-table-wrap" id="log-table-wrap" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Old ISBN</th>
+            <th>Old Title</th>
+            <th>Old Year</th>
+            <th></th>
+            <th>New ISBN</th>
+            <th>New Title</th>
+            <th>New Year</th>
+            <th>Author</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="log-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
 
-            scene.add(object);
-            animate();
-        }, function (xhr) {
-            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-        }, function (error) {
-            console.error('An error occurred loading the model:', error);
-        });
+<div id="toast"></div>
 
-        // Adjust camera position
-        camera.position.set(100, 100, 100);  // Move camera further back
-        camera.lookAt(new THREE.Vector3(0, 0, 0));  // Ensure the camera is looking at the origin
+<script>
+  let API_KEY = 'AIzaSyAf8cXobj58Ek2z9HA8goz_CorHjZSVVo8';
+  let currentOldBook = null;
+  let currentNewBook = null;
+  let logEntries = [];
+  let scanner = null;
+  let scannerActive = false;
+  let scanCooldown = false;
 
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();  // Now controls is properly initialized
-            renderer.render(scene, camera);
-        }
+  window.addEventListener('load', () => {
+    document.getElementById('isbn-input').focus();
+  });
 
-        window.addEventListener('resize', function() {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            renderer.setSize(width, height);
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-        });
-    </script>
+  // ─── ISBN INPUT (keyboard / USB scanner) ─────────────────────────────────
+  document.getElementById('isbn-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') lookupISBN();
+  });
+
+  // ─── CAMERA SCANNER ──────────────────────────────────────────────────────
+  async function toggleCamera() {
+    const btn = document.getElementById('camera-btn');
+    const container = document.getElementById('reader-container');
+    if (scannerActive) {
+      await stopCamera();
+    } else {
+      container.style.display = 'block';
+      btn.textContent = '⏹ Stop Camera';
+      btn.classList.add('active');
+      scanner = new Html5Qrcode('reader');
+      try {
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 300, height: 120 } },
+          (decodedText) => {
+            if (scanCooldown) return;
+            scanCooldown = true;
+            document.getElementById('isbn-input').value = decodedText;
+            lookupISBN();
+            setTimeout(() => { scanCooldown = false; }, 3000);
+          },
+          () => {}
+        );
+        scannerActive = true;
+        document.getElementById('isbn-input').classList.add('scanning-active');
+      } catch (err) {
+        setStatus('error', 'Camera access denied or unavailable.');
+        container.style.display = 'none';
+        btn.textContent = '📷 Camera Scan';
+        btn.classList.remove('active');
+      }
+    }
+  }
+
+  async function stopCamera() {
+    if (scanner && scannerActive) {
+      await scanner.stop().catch(() => {});
+      scanner = null;
+      scannerActive = false;
+    }
+    document.getElementById('reader-container').style.display = 'none';
+    const btn = document.getElementById('camera-btn');
+    btn.textContent = '📷 Camera Scan';
+    btn.classList.remove('active');
+    document.getElementById('isbn-input').classList.remove('scanning-active');
+  }
+
+  // ─── LOOKUP ───────────────────────────────────────────────────────────────
+  async function lookupISBN() {
+    const raw = document.getElementById('isbn-input').value.trim().replace(/[-\s]/g, '');
+    if (!raw) { setStatus('error', 'Please enter or scan an ISBN.'); return; }
+
+    document.getElementById('comparison').style.display = 'none';
+    currentOldBook = null;
+    currentNewBook = null;
+    setStatus('loading', `Looking up ISBN ${raw}…`);
+
+    try {
+      // Step 1: Look up the scanned ISBN
+      const oldBook = await fetchByISBN(raw);
+      if (!oldBook) {
+        setStatus('error', `No book found for ISBN ${raw}. Try a different barcode or check the number.`);
+        return;
+      }
+      currentOldBook = oldBook;
+      setStatus('loading', `Found "${oldBook.title}" — searching for latest edition…`);
+
+      // Step 2: Find the latest edition
+      const newBook = await findLatestEdition(oldBook);
+      currentNewBook = newBook || oldBook; // fallback to same if none found
+
+      renderComparison(oldBook, currentNewBook);
+      setStatus('success', `Found! Compare below and add to your log.`);
+      await stopCamera();
+
+    } catch (err) {
+      setStatus('error', 'Error contacting Google Books API. Check your key and internet connection.');
+      console.error(err);
+    }
+  }
+
+  async function fetchByISBN(isbn) {
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.items || !data.items.length) return null;
+    return parseBook(data.items[0], isbn);
+  }
+
+  async function findLatestEdition(oldBook) {
+    // Search by title + author, pick highest publishedDate
+    const query = encodeURIComponent(`"${oldBook.title}" ${oldBook.authors[0] || ''}`);
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&orderBy=newest&maxResults=20&key=${API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.items) return null;
+
+    // Filter to same title/author family, pick newest by year
+    const candidates = data.items
+      .map(item => parseBook(item, null))
+      .filter(b => b && b.year && isSameWork(oldBook, b));
+
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.year - a.year);
+    return candidates[0];
+  }
+
+  function isSameWork(a, b) {
+    const titleA = normalize(a.title);
+    const titleB = normalize(b.title);
+    const authorA = a.authors[0] ? normalize(a.authors[0]).split(' ').pop() : '';
+    const authorB = b.authors[0] ? normalize(b.authors[0]).split(' ').pop() : '';
+    return titleA === titleB || (authorA && authorA === authorB && titleSimilar(titleA, titleB));
+  }
+
+  function normalize(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
+  function titleSimilar(a, b) {
+    const wa = a.split(' '), wb = b.split(' ');
+    const common = wa.filter(w => w.length > 3 && wb.includes(w));
+    return common.length >= Math.min(2, Math.min(wa.length, wb.length));
+  }
+
+  function parseBook(item, isbnFallback) {
+    const info = item.volumeInfo || {};
+    const isbn13 = (info.industryIdentifiers || []).find(i => i.type === 'ISBN_13');
+    const isbn10 = (info.industryIdentifiers || []).find(i => i.type === 'ISBN_10');
+    const isbn = (isbn13 && isbn13.identifier) || (isbn10 && isbn10.identifier) || isbnFallback || '—';
+    const year = info.publishedDate ? parseInt(info.publishedDate.slice(0,4)) : null;
+    const coverUrl = info.imageLinks
+      ? (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail || null)
+      : null;
+    const cleanCover = coverUrl ? coverUrl.replace('http://', 'https://') : null;
+    return {
+      title: info.title || 'Unknown Title',
+      subtitle: info.subtitle || '',
+      authors: info.authors || ['Unknown Author'],
+      publisher: info.publisher || '—',
+      year: year,
+      edition: info.edition || null,
+      isbn,
+      coverUrl: cleanCover,
+      pageCount: info.pageCount || null,
+    };
+  }
+
+  // ─── RENDER ───────────────────────────────────────────────────────────────
+  function renderComparison(oldBook, newBook) {
+    document.getElementById('old-body').innerHTML = bookCardHTML(oldBook, false);
+    document.getElementById('new-body').innerHTML = bookCardHTML(newBook, true, oldBook);
+    document.getElementById('comparison').style.display = 'block';
+    document.getElementById('comparison').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function bookCardHTML(book, isNew, oldBook) {
+    const cover = book.coverUrl
+      ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" onerror="this.outerHTML=noCoverHTML()">`
+      : `<div class="no-cover">📚<br>No cover<br>available</div>`;
+
+    const isLatest = isNew && oldBook && book.year && oldBook.year && book.year > oldBook.year;
+    const isSame = isNew && oldBook && book.isbn === oldBook.isbn;
+
+    let badge = '';
+    if (isNew && isLatest) badge = `<div class="latest-badge">✦ Newer Edition — ${book.year}</div>`;
+    if (isNew && isSame) badge = `<div class="latest-badge" style="background:linear-gradient(90deg,#4a6741,#7aad6a)">✓ Already Latest Edition</div>`;
+
+    return `
+      <div class="cover-wrap">${cover}</div>
+      <div class="book-title">${escHtml(book.title)}${book.subtitle ? `<span style="font-weight:400;font-size:0.85em;"> — ${escHtml(book.subtitle)}</span>` : ''}</div>
+      <div class="book-meta">
+        <strong>Author${book.authors.length>1?'s':''}:</strong> ${escHtml(book.authors.join(', '))}<br>
+        <strong>Publisher:</strong> ${escHtml(book.publisher)}<br>
+        <strong>Year:</strong> ${book.year || '—'}
+        ${book.edition ? `<br><strong>Edition:</strong> ${escHtml(book.edition)}` : ''}
+        ${book.pageCount ? `<br><strong>Pages:</strong> ${book.pageCount}` : ''}
+      </div>
+      <div class="isbn-tag">${book.isbn}</div>
+      ${badge}
+    `;
+  }
+
+  function noCoverHTML() {
+    return `<div class="no-cover">📚<br>No cover<br>available</div>`;
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ─── LOG ─────────────────────────────────────────────────────────────────
+  function addToLog() {
+    if (!currentOldBook) return;
+    const entry = {
+      num: logEntries.length + 1,
+      oldIsbn: currentOldBook.isbn,
+      oldTitle: currentOldBook.title,
+      oldYear: currentOldBook.year || '—',
+      newIsbn: currentNewBook.isbn,
+      newTitle: currentNewBook.title,
+      newYear: currentNewBook.year || '—',
+      author: (currentOldBook.authors || []).join(', '),
+      status: currentNewBook.isbn !== currentOldBook.isbn ? 'Needs Update' : 'Up to Date'
+    };
+    logEntries.push(entry);
+    renderLogRow(entry);
+    updateStats();
+    document.getElementById('comparison').style.display = 'none';
+    document.getElementById('isbn-input').value = '';
+    document.getElementById('isbn-input').focus();
+    setStatus('idle', 'Book logged! Ready for next scan.');
+    showToast('✅ Added to log!');
+  }
+
+  function skipEntry() {
+    document.getElementById('comparison').style.display = 'none';
+    document.getElementById('isbn-input').value = '';
+    document.getElementById('isbn-input').focus();
+    setStatus('idle', 'Skipped. Ready for next scan.');
+  }
+
+  function renderLogRow(entry) {
+    document.getElementById('log-empty').style.display = 'none';
+    document.getElementById('log-table-wrap').style.display = 'block';
+    const tr = document.createElement('tr');
+    const statusBadge = entry.status === 'Needs Update'
+      ? `<span class="needs-update">⚠ Update</span>`
+      : `<span class="same-edition">✓ Current</span>`;
+    tr.innerHTML = `
+      <td style="color:var(--text-muted);font-size:0.75rem;">${entry.num}</td>
+      <td class="mono">${entry.oldIsbn}</td>
+      <td style="max-width:180px;">${escHtml(entry.oldTitle)}</td>
+      <td style="text-align:center;">${entry.oldYear}</td>
+      <td class="update-arrow" style="text-align:center;">→</td>
+      <td class="mono">${entry.newIsbn}</td>
+      <td style="max-width:180px;">${escHtml(entry.newTitle)}</td>
+      <td style="text-align:center;">${entry.newYear}</td>
+      <td style="color:var(--text-muted);font-size:0.8rem;">${escHtml(entry.author)}</td>
+      <td>${statusBadge}</td>
+      <td><button class="btn-row-del" onclick="deleteRow(${entry.num})">✕</button></td>
+    `;
+    document.getElementById('log-tbody').appendChild(tr);
+    updateLogCount();
+  }
+
+  function deleteRow(num) {
+    logEntries = logEntries.filter(e => e.num !== num);
+    rebuildTable();
+    updateStats();
+    updateLogCount();
+    if (logEntries.length === 0) {
+      document.getElementById('log-empty').style.display = 'block';
+      document.getElementById('log-table-wrap').style.display = 'none';
+    }
+  }
+
+  function rebuildTable() {
+    const tbody = document.getElementById('log-tbody');
+    tbody.innerHTML = '';
+    logEntries.forEach(e => renderLogRow(e));
+  }
+
+  function clearLog() {
+    if (!logEntries.length) return;
+    if (!confirm('Clear all log entries? This cannot be undone.')) return;
+    logEntries = [];
+    document.getElementById('log-tbody').innerHTML = '';
+    document.getElementById('log-empty').style.display = 'block';
+    document.getElementById('log-table-wrap').style.display = 'none';
+    updateStats();
+    updateLogCount();
+    showToast('Log cleared.');
+  }
+
+  function updateLogCount() {
+    document.getElementById('log-count').textContent = `${logEntries.length} ${logEntries.length === 1 ? 'entry' : 'entries'}`;
+  }
+
+  function updateStats() {
+    document.getElementById('stat-scanned').textContent = logEntries.length;
+    document.getElementById('stat-updates').textContent = logEntries.filter(e => e.status === 'Needs Update').length;
+    document.getElementById('stat-current').textContent = logEntries.filter(e => e.status === 'Up to Date').length;
+  }
+
+  // ─── EXPORT ───────────────────────────────────────────────────────────────
+  function exportExcel() {
+    if (!logEntries.length) { showToast('Nothing to export yet!', true); return; }
+
+    const rows = [
+      ['#', 'Old ISBN', 'Old Title', 'Old Year', 'New ISBN', 'New Title', 'New Year', 'Author', 'Status', 'Date Scanned'],
+      ...logEntries.map(e => [
+        e.num, e.oldIsbn, e.oldTitle, e.oldYear,
+        e.newIsbn, e.newTitle, e.newYear,
+        e.author, e.status, new Date().toLocaleDateString()
+      ])
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Column widths
+    ws['!cols'] = [
+      {wch:4},{wch:16},{wch:36},{wch:8},
+      {wch:16},{wch:36},{wch:8},{wch:28},{wch:14},{wch:14}
+    ];
+
+    // Style header row bold (basic)
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c: C });
+      if (!ws[addr]) continue;
+      ws[addr].s = { font: { bold: true }, fill: { fgColor: { rgb: "2D5016" } } };
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Book Scan Log');
+    const date = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, `LibraScan_Log_${date}.xlsx`);
+    showToast(`📥 Exported ${logEntries.length} entries!`);
+  }
+
+  // ─── STATUS ───────────────────────────────────────────────────────────────
+  function setStatus(type, msg) {
+    const bar = document.getElementById('status-bar');
+    bar.className = `status-${type}`;
+    bar.querySelector('.status-msg').textContent = msg;
+  }
+
+  // ─── TOAST ────────────────────────────────────────────────────────────────
+  function showToast(msg, isErr = false, dur = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = isErr ? '#c62828' : 'var(--green)';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), dur);
+  }
+</script>
 </body>
 </html>
