@@ -862,23 +862,69 @@
     };
   }
 
-  // ── Step 2: Find the latest edition using the Work ID ────────────────────
+  // ── Step 2: Find the latest edition using Work ID, with search fallback ──
   async function findLatestEdition(oldBook) {
-    if (!oldBook.workKey) return null;
+    let best = null;
 
-    // Fetch up to 100 editions of this exact work
-    const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
+    // Primary: fetch all editions under the same Work ID
+    if (oldBook.workKey) {
+      const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.entries?.length) {
+        const editions = data.entries
+          .map(e => parseEditionOL(e, oldBook))
+          .filter(e => e && e.year && e.isbn && e.isEnglish);
+        if (editions.length) {
+          editions.sort((a, b) => b.year - a.year);
+          best = editions[0];
+        }
+      }
+    }
+
+    // Fallback: if nothing newer found via Work ID, search OL by title + author.
+    // This catches cases where a new edition got a different Work ID (e.g. author lineup changed).
+    const bestYear = best?.year || oldBook.year || 0;
+    const fallback = await searchLatestByTitleAuthor(oldBook);
+    if (fallback && fallback.year && fallback.year > bestYear && fallback.isbn !== oldBook.isbn) {
+      best = fallback;
+    }
+
+    return best;
+  }
+
+  async function searchLatestByTitleAuthor(oldBook) {
+    const lastName = (oldBook.authors[0] || '').split(' ').pop();
+    const titleQuery = encodeURIComponent(oldBook.title);
+    const authorQuery = encodeURIComponent(lastName);
+    const url = `https://openlibrary.org/search.json?title=${titleQuery}&author=${authorQuery}&sort=new&limit=10&language=eng`;
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.entries || !data.entries.length) return null;
+    if (!data.docs?.length) return null;
 
-    const editions = data.entries
-      .map(e => parseEditionOL(e, oldBook))
-      .filter(e => e && e.year && e.isbn && e.isEnglish);
+    // Pick the doc with the highest publish year that has an ISBN
+    const candidates = data.docs
+      .filter(d => d.isbn?.length && d.publish_year?.length)
+      .map(d => {
+        const year = Math.max(...d.publish_year);
+        const isbn = d.isbn.find(i => i.length === 13) || d.isbn[0];
+        const coverId = d.cover_i;
+        return {
+          title: d.title || oldBook.title,
+          subtitle: d.subtitle || '',
+          authors: (d.author_name || oldBook.authors),
+          publisher: (d.publisher?.[0]) || oldBook.publisher,
+          year,
+          isbn,
+          coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null,
+          pageCount: d.number_of_pages_median || null,
+          isEnglish: true,
+        };
+      });
 
-    if (!editions.length) return null;
-    editions.sort((a, b) => b.year - a.year);
-    return editions[0];
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.year - a.year);
+    return candidates[0];
   }
 
   function parseEditionOL(entry, workBook) {
