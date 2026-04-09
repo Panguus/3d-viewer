@@ -992,20 +992,10 @@
   async function findLatestEdition(oldBook) {
     console.log('🔍 findLatestEdition() called for:', oldBook.title, '| ISBN:', oldBook.isbn, '| workKey:', oldBook.workKey);
 
-    // Step A: Ask Gemini what the latest edition is from its own knowledge first
-    const geminiKnowledge = await askGeminiWhatLatestEditionIs(oldBook);
-    console.log('🧠 Gemini knowledge check:', geminiKnowledge);
-
-    // Step B: Gather Open Library candidates + any ISBN Gemini suggested
-    const candidates = await gatherAllCandidates(oldBook, geminiKnowledge?.isbn);
+    const candidates = await gatherAllCandidates(oldBook);
     console.log(`📚 Total candidates after dedup: ${candidates.length}`, candidates);
 
     if (!candidates.length) {
-      // If OL has nothing but Gemini knows of a newer edition, trust Gemini
-      if (geminiKnowledge && geminiKnowledge.newer) {
-        console.log('🧠 No OL candidates but Gemini knows of a newer edition — using Gemini knowledge');
-        return geminiKnowledge.bookData || null;
-      }
       console.log('⚠️ No candidates found — returning null');
       return null;
     }
@@ -1015,47 +1005,7 @@
     return picked || null;
   }
 
-  async function askGeminiWhatLatestEditionIs(book) {
-    const prompt = `You are a library expert. Based solely on your training knowledge, what is the most recent published edition of this book?
-
-Title: "${book.title}"
-Author(s): ${book.authors.join(', ')}
-Current edition year: ${book.year}
-Current ISBN: ${book.isbn}
-
-If you know of a newer edition, respond with JSON:
-{"newer": true, "year": <year>, "isbn": "<isbn13 if known, else null>", "notes": "<one sentence>"}
-
-If the current edition IS the latest you know of, respond with:
-{"newer": false}
-
-Return only valid JSON, no extra text.`;
-
-    console.log('🧠 Asking Gemini for knowledge check...');
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      const data = await res.json();
-      if (!res.ok) { console.error('🧠 Gemini knowledge check error:', data.error?.message); return null; }
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      console.log('🧠 Gemini knowledge raw:', text);
-      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-      console.log('🧠 Gemini knowledge parsed:', parsed);
-      return parsed;
-    } catch (err) {
-      console.error('🧠 Gemini knowledge check failed:', err);
-      return null;
-    }
-  }
-
-  async function gatherAllCandidates(oldBook, geminiSuggestedIsbn) {
+  async function gatherAllCandidates(oldBook) {
     const results = [];
 
     // Source 1: All editions under the same Work ID (from ISBN lookup)
@@ -1109,18 +1059,6 @@ Return only valid JSON, no extra text.`;
       }));
     } catch (err) { console.error('❌ OL search fetch error:', err); }
 
-    // Source 3: If Gemini suggested a specific ISBN, look it up directly on OL
-    if (geminiSuggestedIsbn && geminiSuggestedIsbn !== oldBook.isbn) {
-      console.log('🧠 Looking up Gemini-suggested ISBN:', geminiSuggestedIsbn);
-      try {
-        const suggested = await fetchByISBN(geminiSuggestedIsbn);
-        if (suggested) {
-          console.log('🧠 Gemini-suggested book found:', suggested);
-          results.push({ ...suggested, isEnglish: true });
-        }
-      } catch (err) { console.error('❌ Gemini ISBN lookup error:', err); }
-    }
-
     // Deduplicate by ISBN
     const seen = new Set();
     const deduped = results.filter(r => {
@@ -1151,7 +1089,7 @@ Return only valid JSON, no extra text.`;
       pages: c.pageCount,
     }));
 
-    const prompt = `You are a library cataloguing expert with deep knowledge of published books. A library needs to know if a newer genuine edition of a book exists.
+    const prompt = `You are a library cataloguing expert. A library needs to know if a newer genuine edition of a book exists.
 
 BOOK ON SHELF:
 Title: "${originalBook.title}"
@@ -1163,23 +1101,13 @@ ISBN: ${originalBook.isbn}
 CANDIDATE EDITIONS FROM OPEN LIBRARY:
 ${JSON.stringify(candidateList, null, 2)}
 
-IMPORTANT: Open Library data is sometimes incomplete or incorrect. Use your own knowledge of this book's publication history too.
-
-Your job:
-1. Check the candidates above for a newer genuine English-language edition of the same work
-2. ALSO use your own training knowledge — if you know a newer edition exists that is NOT in the candidates list, report it
-3. Ignore translations, foreign editions, reprints that are not substantively new editions
-
-Return ONE of these JSON formats only, no extra text:
-
-If a candidate in the list is the latest:
-{"source": "candidates", "latest_index": <index>, "reasoning": "<one sentence>"}
-
-If you know of a newer edition NOT in the list:
-{"source": "knowledge", "isbn": "<isbn13>", "title": "<title>", "year": <year>, "publisher": "<publisher>", "reasoning": "<one sentence>"}
-
-If the book on shelf is already the latest known edition:
-{"source": "none", "latest_index": -1, "reasoning": "<one sentence>"}`;
+Your job: from the candidates above only, identify the most recent genuine English-language edition of the same work. Rules:
+- Ignore translations, foreign-language editions, or unrelated books
+- Ignore reprints that are not substantively new editions
+- Only consider candidates in the list above — do not suggest anything from outside the list
+- If the book on shelf IS already the latest in the list, return {"latest_index": -1, "reasoning": "<one sentence>"}
+- Otherwise return {"latest_index": <index>, "reasoning": "<one sentence>"}
+Return only valid JSON, no extra text.`;
 
     console.log('🤖 Sending to Gemini — candidate count after junk filter:', candidateList.length);
     console.log('🤖 Full prompt:\n', prompt);
@@ -1210,45 +1138,14 @@ If the book on shelf is already the latest known edition:
       const parsed = JSON.parse(clean);
       console.log('🤖 Gemini parsed JSON:', parsed);
 
-      // Case 1: already the latest
-      if (parsed.source === 'none' || parsed.latest_index === -1) {
+      if (parsed.latest_index === -1) {
         console.log('🤖 Gemini says: already the latest. Reasoning:', parsed.reasoning);
         return null;
       }
 
-      // Case 2: a candidate from the list is best
-      if (parsed.source === 'candidates') {
-        const chosen = cleaned[parsed.latest_index];
-        console.log('🤖 Gemini chose candidate index', parsed.latest_index, '→', chosen, '| Reasoning:', parsed.reasoning);
-        return chosen || null;
-      }
-
-      // Case 3: Gemini knows of a newer edition not in the list — look it up on OL
-      if (parsed.source === 'knowledge' && parsed.isbn) {
-        console.log('🤖 Gemini knows of newer edition, looking up ISBN:', parsed.isbn, '| Reasoning:', parsed.reasoning);
-        setStatus('loading', `Gemini found a newer edition — looking it up…`);
-        try {
-          const knownBook = await fetchByISBN(parsed.isbn);
-          if (knownBook) {
-            console.log('🤖 Knowledge ISBN found on OL:', knownBook);
-            return knownBook;
-          }
-        } catch {}
-        // OL doesn't have it either — build a minimal book object from Gemini's data
-        console.log('🤖 OL does not have knowledge ISBN — using Gemini data directly');
-        return {
-          title: parsed.title || originalBook.title,
-          subtitle: '',
-          authors: originalBook.authors,
-          publisher: parsed.publisher || '—',
-          year: parsed.year || null,
-          isbn: parsed.isbn,
-          coverUrl: null,
-          pageCount: null,
-        };
-      }
-
-      return null;
+      const chosen = cleaned[parsed.latest_index];
+      console.log('🤖 Gemini chose index', parsed.latest_index, '→', chosen, '| Reasoning:', parsed.reasoning);
+      return chosen || null;
     } catch (err) {
       console.error('❌ Gemini call failed:', err);
       setStatus('error', err.name === 'AbortError'
@@ -1322,6 +1219,15 @@ If the book on shelf is already the latest known edition:
           <div>
             <div class="check-text">Already the Latest Edition</div>
             <div class="check-sub">No update needed — this book is current.</div>
+          </div>
+        </div>`;
+    } else if (isNew && book.geminiOnly) {
+      topBanner = `
+        <div class="already-latest-banner" style="background:linear-gradient(135deg,#fff8e1,#fff3cd);border-color:#f9a825;">
+          <div class="check-icon">⚠️</div>
+          <div>
+            <div class="check-text" style="color:#e65100;">Unverified — Please Check</div>
+            <div class="check-sub" style="color:#bf360c;">Gemini believes a newer edition exists but could not verify the ISBN. Confirm before logging.</div>
           </div>
         </div>`;
     } else if (isNew && isLatest) {
