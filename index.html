@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://s3.amazonaws.com/download.dymo.com/dymo/Software/JavaScript/dymo.connect.framework.js"></script>
 <style>
   :root {
     --cream: #f5f0e8;
@@ -1304,15 +1305,21 @@ Return only valid JSON, no extra text.`;
   async function printDymoLabel(book) {
     const lccParts = formatLCC(book.lcc);
     if (!lccParts || !lccParts.length) {
-      showToast('No LCC call number available for this edition.', true);
+      showToast('No LCC call number available to print.', true);
       return;
     }
-
-    // Build label XML for Dymo LabelWriter 450 — 30347 1"x1.5" label
-    // Each LCC line gets its own text object stacked vertically
-    const lineHeight = 90;
-    const startY = 20;
-    const labelXml = `<?xml version="1.0" encoding="utf-8"?>
+    try {
+      if (typeof dymo === 'undefined' || !dymo.label || !dymo.label.framework) {
+        showToast('Dymo SDK not loaded — check internet connection.', true);
+        return;
+      }
+      const env = dymo.label.framework.checkEnvironment();
+      if (!env.isFrameworkInstalled) { showToast('Dymo Connect is not installed on this computer.', true); return; }
+      if (!env.isWebServicePresent) { showToast('Dymo Connect service is not running — please start it.', true); return; }
+      const printers = dymo.label.framework.getPrinters();
+      if (!printers.length) { showToast('No Dymo printers found.', true); return; }
+      const printer = printers.find(p => p.printerType === 'LabelWriterPrinter') || printers[0];
+      const labelXml = `<?xml version="1.0" encoding="utf-8"?>
 <DieCutLabel Version="8.0" Units="twips">
   <PaperOrientation>Portrait</PaperOrientation>
   <Id>Address</Id>
@@ -1322,7 +1329,7 @@ Return only valid JSON, no extra text.`;
   </DrawCommands>
   <ObjectInfo>
     <TextObject>
-      <Name>TEXT</Name>
+      <n>TEXT</n>
       <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
       <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
       <LinkedObjectName/>
@@ -1330,12 +1337,12 @@ Return only valid JSON, no extra text.`;
       <IsMirrored>False</IsMirrored>
       <IsVariable>False</IsVariable>
       <HorizontalAlignment>Center</HorizontalAlignment>
-      <VerticalAlignment>Top</VerticalAlignment>
+      <VerticalAlignment>Middle</VerticalAlignment>
       <TextFitMode>ShrinkToFit</TextFitMode>
       <UseFullFontHeight>True</UseFullFontHeight>
       <Verticalized>False</Verticalized>
       <StyledText>
-        ${lccParts.map(line => `<Element><String>${escHtml(line)}</String><Attributes><Font Family="Arial" Size="12" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element><Element><String>&#13;</String><Attributes><Font Family="Arial" Size="12" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element>`).join('')}
+        ${lccParts.map((line, i) => `<Element><String>${escHtml(line)}${i < lccParts.length - 1 ? '&#13;' : ''}</String><Attributes><Font Family="Arial" Size="14" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element>`).join('')}
       </StyledText>
     </TextObject>
     <ObjectLayout>
@@ -1345,27 +1352,12 @@ Return only valid JSON, no extra text.`;
     </ObjectLayout>
   </ObjectInfo>
 </DieCutLabel>`;
-
-    try {
-      // Dymo Connect local service endpoint
-      const statusRes = await fetch('http://localhost:41951/DYMO/DLS/Printing/StatusConnected');
-      if (!statusRes.ok) throw new Error('Dymo Connect not responding');
-
-      const printRes = await fetch('http://localhost:41951/DYMO/DLS/Printing/PrintLabel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          printerName: 'DYMO LabelWriter 450',
-          labelXml: labelXml,
-          printParamsXml: '',
-          labelSetXml: '',
-        })
-      });
-      if (!printRes.ok) throw new Error('Print request failed');
+      const label = dymo.label.framework.openLabelXml(labelXml);
+      label.print(printer.name);
       showToast('🖨 Label printed!');
     } catch (err) {
       console.error('Dymo print error:', err);
-      showToast('Could not reach Dymo Connect — is it running?', true);
+      showToast('Print failed — check Dymo Connect is running.', true);
     }
   }
 
