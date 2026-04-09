@@ -24,6 +24,10 @@
     --card-bg: #fffdf7;
   }
 
+  html {
+    overscroll-behavior: none;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -583,10 +587,34 @@
   @media (max-width: 700px) {
     header { padding: 14px 16px; }
     main { padding: 16px 12px; }
-    .comparison-grid { grid-template-columns: 1fr; }
-    .arrow-divider { padding-top: 0; font-size: 1.5rem; transform: rotate(90deg); }
+    .comparison-grid {
+      grid-template-columns: 1fr;
+    }
+    .arrow-divider {
+      padding-top: 0;
+      font-size: 1.5rem;
+      transform: rotate(90deg);
+      margin: 4px 0;
+    }
     .header-stats { display: none; }
     .scan-panel { padding: 18px 16px; }
+    .action-row { flex-direction: column; }
+    .btn-add, .btn-same, .btn-skip {
+      width: 100%;
+      justify-content: center;
+      padding: 16px;
+      font-size: 1rem;
+    }
+    .log-header { flex-wrap: wrap; gap: 10px; }
+    .input-row { flex-direction: column; }
+    .btn-primary, .btn-camera {
+      width: 100%;
+      justify-content: center;
+      padding: 14px;
+      height: auto;
+    }
+    table { font-size: 0.75rem; }
+    thead th, tbody td { padding: 8px 10px; }
   }
 </style>
 </head>
@@ -1002,11 +1030,15 @@ Return only valid JSON, no extra text.`;
     console.log('🤖 Full prompt:\n', prompt);
 
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await res.json();
       console.log('🤖 Gemini raw HTTP status:', res.status);
       console.log('🤖 Gemini full response:', JSON.stringify(data, null, 2));
@@ -1024,9 +1056,10 @@ Return only valid JSON, no extra text.`;
       return chosen || null;
     } catch (err) {
       console.error('❌ Gemini call failed:', err);
-      const sorted = [...cleaned].sort((a, b) => b.year - a.year);
-      console.log('⚠️ Falling back to newest-by-year:', sorted[0]);
-      return sorted[0] || null;
+      setStatus('error', err.name === 'AbortError'
+        ? 'Gemini timed out — check your connection and try again.'
+        : 'Gemini error — check console for details.');
+      return null;
     }
   }
 
