@@ -745,7 +745,9 @@
 
       // Step 2: Find the latest edition
       const newBook = await findLatestEdition(oldBook);
-      currentNewBook = newBook || oldBook; // fallback to same if none found
+      // Only use newBook if it's actually a different/newer result
+      const best = (newBook && newBook.isbn !== oldBook.isbn) ? newBook : oldBook;
+      currentNewBook = best;
 
       renderComparison(oldBook, currentNewBook);
       setStatus('success', `Found! Compare below and add to your log.`);
@@ -766,57 +768,36 @@
   }
 
   async function findLatestEdition(oldBook) {
-    // Detect original language so we can restrict results to it
-    const langRestrict = detectLang(oldBook.title);
-
-    // Search by title + first author, language-restricted
     const titleWords = oldBook.title.split(' ').slice(0, 6).join(' ');
     const author = oldBook.authors[0] || '';
     const query = encodeURIComponent(`intitle:${titleWords} inauthor:${author}`);
-    const lang = langRestrict ? `&langRestrict=${langRestrict}` : '';
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&orderBy=newest&maxResults=40${lang}&key=${API_KEY}`;
+    const originalLang = oldBook.language || 'en';
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&orderBy=newest&maxResults=40&langRestrict=${originalLang}&key=${API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
     if (!data.items) return null;
 
-    // Parse and strictly filter: must share enough title words AND same author family
     const candidates = data.items
       .map(item => parseBook(item, null))
-      .filter(b => b && b.year && isSameWork(oldBook, b));
+      .filter(b => b && b.year && b.language === originalLang && isSameWork(oldBook, b));
 
     if (!candidates.length) return null;
     candidates.sort((a, b) => b.year - a.year);
     return candidates[0];
   }
 
-  function detectLang(title) {
-    // If title is mostly ASCII letters, assume English
-    const ascii = (title.match(/[a-zA-Z]/g) || []).length;
-    const total = title.replace(/\s/g,'').length;
-    return (total > 0 && ascii / total > 0.5) ? 'en' : null;
-  }
-
   function isSameWork(a, b) {
-    // Reject if title contains non-ASCII characters (foreign translation) when original is English
-    if (detectLang(a.title) === 'en' && detectLang(b.title) !== 'en') return false;
-
     const titleA = normalize(a.title);
     const titleB = normalize(b.title);
-
-    // Titles must share significant key words (ignore short filler words)
     const stopWords = new Set(['the','a','an','of','in','and','to','for','with','on','by','from','at','as','is']);
     const wordsA = titleA.split(' ').filter(w => w.length > 2 && !stopWords.has(w));
     const wordsB = titleB.split(' ').filter(w => w.length > 2 && !stopWords.has(w));
     if (wordsA.length === 0) return false;
     const common = wordsA.filter(w => wordsB.includes(w));
-    const overlapRatio = common.length / wordsA.length;
-    if (overlapRatio < 0.5) return false;
-
-    // At least one author's last name must match
+    if (common.length / wordsA.length < 0.5) return false;
     const lastNamesA = a.authors.map(au => normalize(au).split(' ').pop());
     const lastNamesB = b.authors.map(au => normalize(au).split(' ').pop());
-    const authorMatch = lastNamesA.some(n => n.length > 2 && lastNamesB.includes(n));
-    return authorMatch;
+    return lastNamesA.some(n => n.length > 2 && lastNamesB.includes(n));
   }
 
   function normalize(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
@@ -841,6 +822,7 @@
       isbn,
       coverUrl: cleanCover,
       pageCount: info.pageCount || null,
+      language: info.language || null,
     };
   }
 
