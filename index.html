@@ -393,6 +393,14 @@
     flex: 1;
   }
   .btn-add:hover { box-shadow: 0 6px 20px rgba(45,80,22,0.45); }
+  .btn-same {
+    background: var(--cream-dark);
+    color: var(--brown);
+    border: 2px solid var(--border);
+    padding: 13px 20px;
+    font-size: 0.88rem;
+  }
+  .btn-same:hover { background: var(--border); }
   .btn-skip {
     background: var(--cream-dark);
     color: var(--text-muted);
@@ -612,7 +620,8 @@
     </div>
     <div class="action-row">
       <button class="btn btn-add" onclick="addToLog()">✅ Add to Log &amp; Scan Next</button>
-      <button class="btn btn-skip" onclick="skipEntry()">⏭ Skip This Book</button>
+      <button class="btn btn-same" onclick="markAsSame()">📌 Same Edition</button>
+      <button class="btn btn-skip" onclick="skipEntry()">⏭ Skip</button>
     </div>
   </div>
 
@@ -658,7 +667,6 @@
 <div id="toast"></div>
 
 <script>
-  let API_KEY = 'AIzaSyAf8cXobj58Ek2z9HA8goz_CorHjZSVVo8';
   let currentOldBook = null;
   let currentNewBook = null;
   let logEntries = [];
@@ -734,7 +742,6 @@
     setStatus('loading', `Looking up ISBN ${raw}…`);
 
     try {
-      // Step 1: Look up the scanned ISBN
       const oldBook = await fetchByISBN(raw);
       if (!oldBook) {
         setStatus('error', `No book found for ISBN ${raw}. Try a different barcode or check the number.`);
@@ -743,9 +750,7 @@
       currentOldBook = oldBook;
       setStatus('loading', `Found "${oldBook.title}" — searching for latest edition…`);
 
-      // Step 2: Find the latest edition
       const newBook = await findLatestEdition(oldBook);
-      // Only use newBook if it's actually a different/newer result
       const best = (newBook && newBook.isbn !== oldBook.isbn) ? newBook : oldBook;
       currentNewBook = best;
 
@@ -754,77 +759,102 @@
       await stopCamera();
 
     } catch (err) {
-      setStatus('error', 'Error contacting Google Books API. Check your key and internet connection.');
+      setStatus('error', 'Error contacting Open Library. Check your internet connection.');
       console.error(err);
     }
   }
 
+  // ── Step 1: Fetch the scanned ISBN from Open Library ──────────────────────
   async function fetchByISBN(isbn) {
-    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${API_KEY}`;
+    const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.items || !data.items.length) return null;
-    return parseBook(data.items[0], isbn);
+    const info = data[`ISBN:${isbn}`];
+    if (!info) return null;
+    return parseBookOL(info, isbn);
   }
 
-  async function findLatestEdition(oldBook) {
-    const titleWords = oldBook.title.split(' ').slice(0, 6).join(' ');
-    const author = oldBook.authors[0] || '';
-    const query = encodeURIComponent(`intitle:${titleWords} inauthor:${author}`);
-    const originalLang = oldBook.language || 'en';
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&orderBy=newest&maxResults=40&langRestrict=${originalLang}&key=${API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.items) return null;
+  function parseBookOL(info, isbnFallback) {
+    const isbn13 = (info.identifiers?.isbn_13 || [])[0];
+    const isbn10 = (info.identifiers?.isbn_10 || [])[0];
+    const isbn = isbn13 || isbn10 || isbnFallback || '—';
 
-    const candidates = data.items
-      .map(item => parseBook(item, null))
-      .filter(b => b && b.year && b.language === originalLang && isSameWork(oldBook, b));
+    const yearMatch = (info.publish_date || '').match(/\d{4}/);
+    const year = yearMatch ? parseInt(yearMatch[0]) : null;
 
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.year - a.year);
-    return candidates[0];
-  }
+    const authors = (info.authors || []).map(a => a.name).filter(Boolean);
+    const publishers = (info.publishers || []).map(p => p.name).filter(Boolean);
+    const workKey = (info.works || [])[0]?.key || null; // e.g. "/works/OL123W"
 
-  function isSameWork(a, b) {
-    const titleA = normalize(a.title);
-    const titleB = normalize(b.title);
-    const stopWords = new Set(['the','a','an','of','in','and','to','for','with','on','by','from','at','as','is']);
-    const wordsA = titleA.split(' ').filter(w => w.length > 2 && !stopWords.has(w));
-    const wordsB = titleB.split(' ').filter(w => w.length > 2 && !stopWords.has(w));
-    if (wordsA.length === 0) return false;
-    const common = wordsA.filter(w => wordsB.includes(w));
-    if (common.length / wordsA.length < 0.5) return false;
-    const lastNamesA = a.authors.map(au => normalize(au).split(' ').pop());
-    const lastNamesB = b.authors.map(au => normalize(au).split(' ').pop());
-    return lastNamesA.some(n => n.length > 2 && lastNamesB.includes(n));
-  }
+    // Open Library cover — use their cover API with the ISBN directly
+    const coverUrl = isbn ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg` : null;
 
-  function normalize(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
-
-  function parseBook(item, isbnFallback) {
-    const info = item.volumeInfo || {};
-    const isbn13 = (info.industryIdentifiers || []).find(i => i.type === 'ISBN_13');
-    const isbn10 = (info.industryIdentifiers || []).find(i => i.type === 'ISBN_10');
-    const isbn = (isbn13 && isbn13.identifier) || (isbn10 && isbn10.identifier) || isbnFallback || '—';
-    const year = info.publishedDate ? parseInt(info.publishedDate.slice(0,4)) : null;
-    const coverUrl = info.imageLinks
-      ? (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail || null)
-      : null;
-    const cleanCover = coverUrl ? coverUrl.replace('http://', 'https://') : null;
     return {
       title: info.title || 'Unknown Title',
       subtitle: info.subtitle || '',
-      authors: info.authors || ['Unknown Author'],
-      publisher: info.publisher || '—',
-      year: year,
-      edition: info.edition || null,
+      authors: authors.length ? authors : ['Unknown Author'],
+      publisher: publishers.join(', ') || '—',
+      year,
       isbn,
-      coverUrl: cleanCover,
-      pageCount: info.pageCount || null,
-      language: info.language || null,
+      coverUrl,
+      workKey,
+      pageCount: info.number_of_pages || null,
     };
   }
+
+  // ── Step 2: Find the latest edition using the Work ID ────────────────────
+  async function findLatestEdition(oldBook) {
+    if (!oldBook.workKey) return null;
+
+    // Fetch up to 100 editions of this exact work
+    const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.entries || !data.entries.length) return null;
+
+    const editions = data.entries
+      .map(e => parseEditionOL(e, oldBook))
+      .filter(e => e && e.year && e.isbn && e.isEnglish);
+
+    if (!editions.length) return null;
+    editions.sort((a, b) => b.year - a.year);
+    return editions[0];
+  }
+
+  function parseEditionOL(entry, workBook) {
+    const isbn13 = (entry.isbn_13 || [])[0];
+    const isbn10 = (entry.isbn_10 || [])[0];
+    const isbn = isbn13 || isbn10 || null;
+    if (!isbn) return null;
+
+    const yearMatch = (entry.publish_date || '').match(/\d{4}/);
+    const year = yearMatch ? parseInt(yearMatch[0]) : null;
+
+    // Language: OL uses keys like "/languages/eng"
+    const langs = (entry.languages || []).map(l => l.key || '');
+    // If no language listed, assume English (most common for unlabeled entries)
+    const isEnglish = langs.length === 0 || langs.some(l => l.includes('/eng'));
+
+    const coverUrl = entry.covers?.[0]
+      ? `https://covers.openlibrary.org/b/id/${entry.covers[0]}-M.jpg`
+      : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`;
+
+    const publishers = (entry.publishers || []).join(', ') || workBook.publisher || '—';
+
+    return {
+      title: entry.title || workBook.title,
+      subtitle: entry.subtitle || '',
+      authors: workBook.authors, // reuse from the work — editions don't repeat author names
+      publisher: publishers,
+      year,
+      isbn,
+      coverUrl,
+      pageCount: entry.number_of_pages || null,
+      isEnglish,
+    };
+  }
+
+  function normalize(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
   function renderComparison(oldBook, newBook) {
@@ -891,6 +921,15 @@
     document.getElementById('isbn-input').focus();
     setStatus('idle', 'Book logged! Ready for next scan.');
     showToast('✅ Added to log!');
+  }
+
+  function markAsSame() {
+    if (!currentOldBook) return;
+    // Override: treat the scanned book as the latest edition
+    currentNewBook = currentOldBook;
+    // Re-render right card to show "Already Latest Edition"
+    document.getElementById('new-body').innerHTML = bookCardHTML(currentOldBook, true, currentOldBook);
+    showToast('📌 Marked as same edition.');
   }
 
   function skipEntry() {
