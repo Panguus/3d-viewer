@@ -1395,7 +1395,7 @@ Return only valid JSON, no extra text.`;
 
   function bookCardHTML(book, isNew, oldBook) {
     const cover = book.coverUrl
-      ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" onerror="this.outerHTML=noCoverHTML()" onload="checkCoverValid(this)">`
+      ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" data-isbn="${book.isbn}" onerror="this.outerHTML=noCoverHTML()" onload="checkCoverValid(this)">`
       : `<div class="no-cover">📚<br>No cover<br>available</div>`;
 
     const isLatest = isNew && oldBook && book.year && oldBook.year && book.year > oldBook.year;
@@ -1445,10 +1445,31 @@ Return only valid JSON, no extra text.`;
     `;
   }
 
+  const GB_KEY = 'AIzaSyAf8cXobj58Ek2z9HA8goz_CorHjZSVVo8';
+
+  async function fetchGBCover(isbn) {
+    if (!isbn || isbn === '—') return null;
+    try {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&fields=items/volumeInfo/imageLinks&key=${GB_KEY}`);
+      const data = await res.json();
+      const links = data.items?.[0]?.volumeInfo?.imageLinks;
+      if (!links) return null;
+      const url = links.large || links.medium || links.thumbnail || links.smallThumbnail || null;
+      return url ? url.replace('http://', 'https://').replace('&edge=curl', '') : null;
+    } catch { return null; }
+  }
+
   function checkCoverValid(img) {
-    // OL returns a 1x1 or tiny grey image when no cover exists — detect by natural size
     if (img.naturalWidth <= 1 || img.naturalHeight <= 1) {
-      img.outerHTML = noCoverHTML();
+      const isbn = img.dataset.isbn;
+      if (isbn && isbn !== '—') {
+        fetchGBCover(isbn).then(url => {
+          if (url) { img.src = url; }
+          else { img.outerHTML = noCoverHTML(); }
+        });
+      } else {
+        img.outerHTML = noCoverHTML();
+      }
     }
   }
 
