@@ -723,29 +723,22 @@
       <span class="lbl">Up to Date</span>
     </div>
   </div>
-  <button class="btn-settings" onclick="toggleSettings()" title="Settings">⚙️</button>
 </header>
 
-
-
-<!-- SETTINGS PANEL -->
-<div id="settings-panel" style="display:none;">
-  <div class="settings-backdrop" onclick="toggleSettings()"></div>
-  <div class="settings-drawer">
-    <div class="settings-title">⚙️ Settings</div>
-    <div class="settings-field">
-      <label>Gemini API Key</label>
-      <div class="settings-input-row">
-        <input type="password" id="gemini-key-input" placeholder="AIza..." autocomplete="off">
-        <button class="btn btn-primary" style="height:40px;padding:0 16px;font-size:0.85rem;" onclick="saveGeminiKey()">Save</button>
-      </div>
-      <p class="settings-hint">Stored locally in your browser only — never in the file.</p>
-    </div>
-    <button class="btn btn-skip" style="margin-top:16px;width:100%;justify-content:center;" onclick="toggleSettings()">Close</button>
-  </div>
-</div>
-
 <main>
+  <!-- API KEY PANEL -->
+  <div class="scan-panel" id="key-panel">
+    <div class="panel-title">Gemini API Key</div>
+    <div class="input-row">
+      <div class="isbn-input-wrap">
+        <label for="gemini-key-input">Your key is saved locally in your browser — never stored in the file</label>
+        <input type="password" id="gemini-key-input" placeholder="AIza..." autocomplete="off">
+      </div>
+      <button class="btn btn-primary" onclick="saveGeminiKey()">💾 Save Key</button>
+    </div>
+    <div id="key-status-bar" style="margin-top:10px;font-size:0.85rem;color:var(--text-muted);"></div>
+  </div>
+
   <!-- SCAN PANEL -->
   <div class="scan-panel">
     <div class="panel-title">Scan or Enter ISBN</div>
@@ -840,32 +833,27 @@
     const stored = localStorage.getItem('librascan_gemini_key');
     if (stored) {
       GEMINI_KEY = stored;
-      console.log('🔑 Gemini key loaded from localStorage');
+      document.getElementById('gemini-key-input').placeholder = 'Key saved — paste a new one to replace';
+      document.getElementById('key-status-bar').innerHTML = '✅ <strong>Key loaded.</strong> Ready to scan.';
+      document.getElementById('key-status-bar').style.color = 'var(--green)';
     } else {
-      setStatus('error', 'No Gemini API key set — click ⚙️ in the header to add one.');
+      document.getElementById('key-status-bar').innerHTML = '⚠️ No key saved yet — paste your Gemini API key above and hit Save.';
+      document.getElementById('key-status-bar').style.color = '#e65100';
     }
     document.getElementById('isbn-input').focus();
   });
 
-  function toggleSettings() {
-    const panel = document.getElementById('settings-panel');
-    const isOpen = panel.style.display !== 'none';
-    panel.style.display = isOpen ? 'none' : 'block';
-    if (!isOpen) {
-      const input = document.getElementById('gemini-key-input');
-      input.value = GEMINI_KEY ? '••••••••••••••••' : '';
-      input.placeholder = GEMINI_KEY ? 'Key already set — paste new one to replace' : 'AIza...';
-    }
-  }
-
   function saveGeminiKey() {
     const val = document.getElementById('gemini-key-input').value.trim();
-    if (!val || val.startsWith('•')) { showToast('Paste a valid API key first.', true); return; }
+    if (!val) { showToast('Please paste a valid API key first.', true); return; }
     GEMINI_KEY = val;
     localStorage.setItem('librascan_gemini_key', val);
-    toggleSettings();
-    setStatus('idle', 'Ready — scan a barcode or type an ISBN and press Look Up.');
-    showToast('✅ Gemini key saved securely in your browser.');
+    document.getElementById('gemini-key-input').value = '';
+    document.getElementById('gemini-key-input').placeholder = 'Key saved — paste a new one to replace';
+    document.getElementById('key-status-bar').innerHTML = '✅ <strong>Key saved.</strong> Ready to scan.';
+    document.getElementById('key-status-bar').style.color = 'var(--green)';
+    showToast('✅ Gemini key saved in your browser.');
+    document.getElementById('isbn-input').focus();
   }
 
   // ─── ISBN INPUT (keyboard / USB scanner) ─────────────────────────────────
@@ -937,8 +925,7 @@
   }
   async function lookupISBN() {
     if (!GEMINI_KEY) {
-      setStatus('error', 'No Gemini API key set — click ⚙️ in the header to add one.');
-      toggleSettings();
+      setStatus('error', 'No Gemini API key set — paste your key in the field above and hit Save.');
       return;
     }
     const raw = document.getElementById('isbn-input').value.trim().replace(/[-\s]/g, '');
