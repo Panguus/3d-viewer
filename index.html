@@ -866,11 +866,15 @@
 
   // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
+    console.log('🔍 findLatestEdition() called for:', oldBook.title, '| ISBN:', oldBook.isbn, '| workKey:', oldBook.workKey);
     const candidates = await gatherAllCandidates(oldBook);
-    if (!candidates.length) return null;
-
-    // Let Gemini sort through the noise
+    console.log(`📚 Total candidates after dedup: ${candidates.length}`, candidates);
+    if (!candidates.length) {
+      console.log('⚠️ No candidates found — returning null');
+      return null;
+    }
     const picked = await askGeminiForLatest(oldBook, candidates);
+    console.log('✅ Final picked result:', picked);
     return picked || null;
   }
 
@@ -879,25 +883,32 @@
 
     // Source 1: All editions under the same Work ID
     if (oldBook.workKey) {
+      console.log('📖 Fetching Work editions:', `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`);
       try {
         const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
         const res = await fetch(url);
         const data = await res.json();
+        console.log(`📖 Raw Work editions returned: ${data.entries?.length ?? 0}`);
         if (data.entries?.length) {
-          data.entries
+          const parsed = data.entries
             .map(e => parseEditionOL(e, oldBook))
-            .filter(e => e && e.year && e.isbn && e.isEnglish)
-            .forEach(e => results.push(e));
+            .filter(e => e && e.year && e.isbn && e.isEnglish);
+          console.log(`📖 After filtering (English + has ISBN + has year): ${parsed.length}`, parsed.map(e => `${e.year} — ${e.title} (${e.isbn})`));
+          parsed.forEach(e => results.push(e));
         }
-      } catch {}
+      } catch (err) { console.error('❌ Work editions fetch error:', err); }
+    } else {
+      console.warn('⚠️ oldBook has no workKey — skipping Work ID lookup');
     }
 
     // Source 2: Open Library title+author search (catches different Work IDs)
+    const lastName = (oldBook.authors[0] || '').split(' ').pop();
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=15&language=eng`;
+    console.log('🔎 OL title+author search URL:', searchUrl);
     try {
-      const lastName = (oldBook.authors[0] || '').split(' ').pop();
-      const url = `https://openlibrary.org/search.json?title=${encodeURIComponent(oldBook.title)}&author=${encodeURIComponent(lastName)}&sort=new&limit=15&language=eng`;
-      const res = await fetch(url);
+      const res = await fetch(searchUrl);
       const data = await res.json();
+      console.log(`🔎 OL search returned ${data.docs?.length ?? 0} docs:`, data.docs?.map(d => `${d.title} (${Math.max(...(d.publish_year||[0]))}) — ISBNs: ${(d.isbn||[]).slice(0,3).join(', ')}`));
       if (data.docs?.length) {
         data.docs
           .filter(d => d.isbn?.length && d.publish_year?.length)
@@ -918,15 +929,17 @@
             });
           });
       }
-    } catch {}
+    } catch (err) { console.error('❌ OL search fetch error:', err); }
 
     // Deduplicate by ISBN
     const seen = new Set();
-    return results.filter(r => {
+    const deduped = results.filter(r => {
       if (seen.has(r.isbn)) return false;
       seen.add(r.isbn);
       return true;
     });
+    console.log(`🗂️ After dedup: ${deduped.length} unique candidates`);
+    return deduped;
   }
 
   async function askGeminiForLatest(originalBook, candidates) {
@@ -959,6 +972,9 @@ Your job: identify which candidate is the most recent, genuine English-language 
 - Otherwise return {"latest_index": <index of the best candidate>}
 Return only valid JSON, no explanation.`;
 
+    console.log('🤖 Sending to Gemini — candidate count:', candidateList.length);
+    console.log('🤖 Full prompt:\n', prompt);
+
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
         method: 'POST',
@@ -966,16 +982,24 @@ Return only valid JSON, no explanation.`;
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
       const data = await res.json();
+      console.log('🤖 Gemini raw HTTP status:', res.status);
+      console.log('🤖 Gemini full response:', JSON.stringify(data, null, 2));
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('🤖 Gemini text output:', text);
       const clean = text.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(clean);
-      if (parsed.latest_index === -1) return null; // already latest
+      console.log('🤖 Gemini parsed JSON:', parsed);
+      if (parsed.latest_index === -1) {
+        console.log('🤖 Gemini says: already the latest edition');
+        return null;
+      }
       const chosen = candidates[parsed.latest_index];
+      console.log('🤖 Gemini chose index', parsed.latest_index, '→', chosen);
       return chosen || null;
     } catch (err) {
-      console.error('Gemini error:', err);
-      // Fallback: just return the newest by year if Gemini fails
+      console.error('❌ Gemini call failed:', err);
       const sorted = [...candidates].sort((a, b) => b.year - a.year);
+      console.log('⚠️ Falling back to newest-by-year:', sorted[0]);
       return sorted[0] || null;
     }
   }
