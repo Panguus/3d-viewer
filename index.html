@@ -7,7 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Mono:wght@400;500&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="https://127.0.0.1:41951/DYMO/DLS/Printing/JavaScript/dymo.connect.framework.js"></script>
 <style>
   :root {
     --cream: #f5f0e8;
@@ -1302,71 +1301,75 @@ Return only valid JSON, no extra text.`;
     return parts;
   }
 
-  async function printDymoLabel(book) {
+  function printDymoLabel(book) {
     const lccParts = formatLCC(book.lcc);
     if (!lccParts || !lccParts.length) {
       showToast('No LCC call number available to print.', true);
       return;
     }
-    try {
-      // Get printer list directly from Dymo web service REST API
-      const printersRes = await fetch('https://127.0.0.1:41951/DYMO/DLS/Printing/GetPrinters');
-      if (!printersRes.ok) throw new Error('Could not reach Dymo Web Service');
-      const printersXml = await printersRes.text();
-      const parser = new DOMParser();
-      const printerDoc = parser.parseFromString(printersXml, 'text/xml');
-      const printerName = printerDoc.querySelector('LabelWriterPrinter Name')?.textContent
-                       || printerDoc.querySelector('Printer Name')?.textContent
-                       || 'DYMO LabelWriter 450';
-      console.log('🖨 Using printer:', printerName);
-      const labelXml = `<?xml version="1.0" encoding="utf-8"?>
-<DieCutLabel Version="8.0" Units="twips">
-  <PaperOrientation>Portrait</PaperOrientation>
-  <Id>Address</Id>
-  <PaperName>30347 1 in x 1-1/2 in</PaperName>
-  <DrawCommands>
-    <RoundRectangle X="0" Y="0" Width="1440" Height="2160" Rx="180" Ry="180"/>
-  </DrawCommands>
-  <ObjectInfo>
-    <TextObject>
-      <n>TEXT</n>
-      <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
-      <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
-      <LinkedObjectName/>
-      <Rotation>Rotation0</Rotation>
-      <IsMirrored>False</IsMirrored>
-      <IsVariable>False</IsVariable>
-      <HorizontalAlignment>Center</HorizontalAlignment>
-      <VerticalAlignment>Middle</VerticalAlignment>
-      <TextFitMode>ShrinkToFit</TextFitMode>
-      <UseFullFontHeight>True</UseFullFontHeight>
-      <Verticalized>False</Verticalized>
-      <StyledText>
-        ${lccParts.map((line, i) => `<Element><String>${escHtml(line)}${i < lccParts.length - 1 ? '&#13;' : ''}</String><Attributes><Font Family="Arial" Size="14" Bold="True" Italic="False" Underline="False" Strikeout="False"/><ForeColor Alpha="255" Red="0" Green="0" Blue="0"/></Attributes></Element>`).join('')}
-      </StyledText>
-    </TextObject>
-    <ObjectLayout>
-      <DYMOPoint><X>72</X><Y>72</Y></DYMOPoint>
-      <Size><Width>1296</Width><Height>2016</Height></Size>
-      <ZOrder>0</ZOrder>
-    </ObjectLayout>
-  </ObjectInfo>
-</DieCutLabel>`;
-      // Send print job via REST API
-      const printRes = await fetch('https://127.0.0.1:41951/DYMO/DLS/Printing/PrintLabel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ printerName, labelXml, printParamsXml: '', labelSetXml: '' })
-      });
-      if (!printRes.ok) throw new Error('Print request failed');
-      showToast('🖨 Label printed!');
-    } catch (err) {
-      console.error('Dymo print error:', err);
-      showToast('Print failed — check Dymo Connect is running.', true);
-    }
+
+    // Build a hidden print-only page sized exactly to 30347 label (1" x 1.5")
+    const labelHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          @page {
+            size: 1in 1.5in;
+            margin: 0;
+          }
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body {
+            width: 1in;
+            height: 1.5in;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+          }
+          .label {
+            width: 0.9in;
+            height: 1.4in;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1pt;
+          }
+          .line {
+            font-family: Arial, sans-serif;
+            font-size: 14pt;
+            font-weight: bold;
+            text-align: center;
+            line-height: 1.1;
+            color: black;
+            white-space: nowrap;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="label">
+          ${lccParts.map(l => `<div class="line">${l}</div>`).join('')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Open a tiny hidden iframe, write the label, and print it
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1in;height:1.5in;border:none;';
+    document.body.appendChild(iframe);
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(labelHtml);
+    iframe.contentDocument.close();
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      setTimeout(() => document.body.removeChild(iframe), 2000);
+    }, 300);
   }
 
-  function renderComparison(oldBook, newBook) {
+    function renderComparison(oldBook, newBook) {
     const isSameEdition = newBook.isbn === oldBook.isbn;
     document.getElementById('old-body').innerHTML = bookCardHTML(oldBook, false);
     document.getElementById('new-body').innerHTML = bookCardHTML(newBook, true, oldBook);
