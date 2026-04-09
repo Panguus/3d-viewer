@@ -766,7 +766,20 @@
     document.getElementById('isbn-input').classList.remove('scanning-active');
   }
 
-  // ─── LOOKUP ───────────────────────────────────────────────────────────────
+  const GB_KEY = 'AIzaSyAf8cXobj58Ek2z9HA8goz_CorHjZSVVo8';
+
+  async function fetchCoverFromGB(isbn) {
+    try {
+      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${GB_KEY}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.items || !data.items.length) return null;
+      const links = data.items[0].volumeInfo?.imageLinks;
+      if (!links) return null;
+      const raw = links.large || links.medium || links.thumbnail || links.smallThumbnail || null;
+      return raw ? raw.replace('http://', 'https://').replace('&edge=curl', '') : null;
+    } catch { return null; }
+  }
   async function lookupISBN() {
     const raw = document.getElementById('isbn-input').value.trim().replace(/[-\s]/g, '');
     if (!raw) { setStatus('error', 'Please enter or scan an ISBN.'); return; }
@@ -785,9 +798,21 @@
       currentOldBook = oldBook;
       setStatus('loading', `Found "${oldBook.title}" — searching for latest edition…`);
 
-      const newBook = await findLatestEdition(oldBook);
+      const [newBook, oldCover] = await Promise.all([
+        findLatestEdition(oldBook),
+        fetchCoverFromGB(oldBook.isbn)
+      ]);
+
+      if (oldCover) oldBook.coverUrl = oldCover;
+
       const best = (newBook && newBook.isbn !== oldBook.isbn) ? newBook : oldBook;
       currentNewBook = best;
+
+      // Fetch new book cover from GB if it's a different edition
+      if (best.isbn !== oldBook.isbn) {
+        const newCover = await fetchCoverFromGB(best.isbn);
+        if (newCover) best.coverUrl = newCover;
+      }
 
       renderComparison(oldBook, currentNewBook);
       setStatus('success', `Found! Compare below and add to your log.`);
@@ -821,8 +846,8 @@
     const publishers = (info.publishers || []).map(p => p.name).filter(Boolean);
     const workKey = (info.works || [])[0]?.key || null; // e.g. "/works/OL123W"
 
-    // Open Library cover — use their cover API with the ISBN directly
-    const coverUrl = isbn ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg` : null;
+    // Use cover URL directly from the API response — much more accurate than guessing by ISBN
+    const coverUrl = info.cover?.large || info.cover?.medium || info.cover?.small || null;
 
     return {
       title: info.title || 'Unknown Title',
@@ -870,9 +895,10 @@
     // If no language listed, assume English (most common for unlabeled entries)
     const isEnglish = langs.length === 0 || langs.some(l => l.includes('/eng'));
 
+    // Only use cover if OL has an explicit cover ID for this edition
     const coverUrl = entry.covers?.[0]
       ? `https://covers.openlibrary.org/b/id/${entry.covers[0]}-M.jpg`
-      : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`;
+      : null;
 
     const publishers = (entry.publishers || []).join(', ') || workBook.publisher || '—';
 
@@ -1103,4 +1129,3 @@
 </script>
 </body>
 </html>
-
