@@ -1072,7 +1072,8 @@
     };
   }
 
-  const GEMINI_KEY = 'AIzaSyBJIvj2AVJbDv2lEJRDJxEIuSs1rKyELpE';
+  // ── Cloudflare Worker proxy — Gemini key lives server-side ───────────────
+  const GEMINI_PROXY = 'https://wild-sea-8823.mbwservicesllc.workers.dev';
 
   // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
@@ -1268,13 +1269,12 @@ Return only valid JSON, no extra text.`;
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`, {
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(GEMINI_PROXY, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({ prompt }),
         signal: controller.signal,
-        referrerPolicy: 'no-referrer',
       });
       clearTimeout(timeout);
       const data = await res.json();
