@@ -1313,17 +1313,26 @@
     });
     console.log(`🧹 After junk filter: ${cleaned.length} candidates (was ${candidates.length})`);
 
-    const candidateList = cleaned.map((c, i) => ({
-      index: i,
-      isbn: c.isbn,
-      title: c.title,
-      authors: c.authors,
-      publisher: c.publisher,
-      year: c.year,
-      pages: c.pageCount,
-    }));
+    // Flag likely reprints — same publisher, same page count, year within 3 years
+    // These get passed to Gemini but tagged so it can make a better call
+    const candidateList = cleaned.map((c, i) => {
+      const samePublisher = normalize(c.publisher || '') === normalize(originalBook.publisher || '');
+      const samePages = c.pageCount && originalBook.pageCount && c.pageCount === originalBook.pageCount;
+      const closeYear = c.year && originalBook.year && Math.abs(c.year - originalBook.year) <= 3;
+      const likelyReprint = samePublisher && samePages && closeYear && c.isbn !== originalBook.isbn;
+      return {
+        index: i,
+        isbn: c.isbn,
+        title: c.title,
+        authors: c.authors,
+        publisher: c.publisher,
+        year: c.year,
+        pages: c.pageCount,
+        ...(likelyReprint ? { note: 'same publisher + same page count + close year — likely reprint, not new edition' } : {}),
+      };
+    });
 
-    const prompt = `You are a library cataloguing expert. A library needs to know if a newer genuine edition of a book exists.
+    const prompt = `You are a library cataloguing expert. A library needs to know if a newer SUBSTANTIVE edition of a book exists.
 
 BOOK ON SHELF:
 Title: "${originalBook.title}"
@@ -1331,17 +1340,20 @@ Authors: ${originalBook.authors.join(', ')}
 Year: ${originalBook.year}
 Publisher: ${originalBook.publisher}
 ISBN: ${originalBook.isbn}
+Pages: ${originalBook.pageCount || 'unknown'}
 
 CANDIDATE EDITIONS FROM OPEN LIBRARY:
 ${JSON.stringify(candidateList, null, 2)}
 
-Your job: from the candidates above only, identify the most recent genuine English-language PRINT edition of the same work. Rules:
+Your job: from the candidates above only, identify the most recent genuine English-language PRINT edition that represents a SUBSTANTIVE new edition of the same work. Rules:
 - Ignore translations, foreign-language editions, or unrelated books
-- Ignore reprints that are not substantively new editions
+- CRITICAL: Ignore reprints, revised printings, or copyright updates that are NOT substantively new editions — a new ISBN with the same publisher, same page count, and a year difference of 1-3 years is almost always just a reprint, NOT a new edition
+- Any candidate flagged with note "likely reprint" should be treated as a reprint unless there is strong evidence otherwise
+- A genuine new edition typically has a new edition number, substantially different page count, new subtitle, or the publisher explicitly calls it a new edition
 - IGNORE ebooks, Kindle editions, digital editions, or any electronic-only format — physical print only
 - Publishers like "Kindle Edition", pages of 0 or null combined with suspiciously round years are often ebooks — skip them
 - Only consider candidates in the list above — do not suggest anything from outside the list
-- If the book on shelf IS already the latest print edition in the list, return {"latest_index": -1, "reasoning": "<one sentence>"}
+- If the book on shelf IS already the latest genuine print edition in the list, return {"latest_index": -1, "reasoning": "<one sentence>"}
 - Otherwise return {"latest_index": <index>, "reasoning": "<one sentence>"}
 Return only valid JSON, no extra text.`;
 
