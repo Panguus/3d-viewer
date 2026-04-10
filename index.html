@@ -840,6 +840,29 @@
     document.getElementById('isbn-input').focus();
   });
 
+  // ─── HELPERS ──────────────────────────────────────────────────────────────
+  // Normalize a string for fuzzy title matching
+  function normalize(str) {
+    return String(str).toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  // Open Library's editions.json and isbn.json endpoints don't send CORS headers
+  // when called from GitHub Pages, so we route them through a proxy.
+  const OL_PROXY = 'https://corsproxy.io/?url=';
+  async function olFetch(url) {
+    // Try direct first; if CORS blocks it, fall back to proxy
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      console.warn(`⚠️ Direct fetch failed for ${url} — retrying via proxy`);
+      const res = await fetch(OL_PROXY + encodeURIComponent(url));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    }
+  }
+
   // ─── ISBN INPUT (keyboard / USB scanner) ─────────────────────────────────
   document.getElementById('isbn-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') lookupISBN();
@@ -1076,7 +1099,7 @@
       console.log('📖 Fetching Work editions:', `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`);
       try {
         const url = `https://openlibrary.org${oldBook.workKey}/editions.json?limit=100`;
-        const res = await fetch(url);
+        const res = await olFetch(url);
         const data = await res.json();
         console.log(`📖 Raw Work editions returned: ${data.entries?.length ?? 0}`);
         if (data.entries?.length) {
@@ -1091,7 +1114,7 @@
       // No workKey from api/books — try fetching the edition record directly to get one
       console.warn('⚠️ oldBook has no workKey — trying direct edition lookup');
       try {
-        const editionRes = await fetch(`https://openlibrary.org/isbn/${oldBook.isbn}.json`);
+        const editionRes = await olFetch(`https://openlibrary.org/isbn/${oldBook.isbn}.json`);
         if (editionRes.ok) {
           const editionData = await editionRes.json();
           const directWorkKey = (editionData.works || [])[0]?.key || null;
@@ -1099,7 +1122,7 @@
           if (directWorkKey) {
             oldBook.workKey = directWorkKey; // save for use in search dedup
             const url = `https://openlibrary.org${directWorkKey}/editions.json?limit=100`;
-            const wRes = await fetch(url);
+            const wRes = await olFetch(url);
             const wData = await wRes.json();
             console.log(`📖 Direct work editions returned: ${wData.entries?.length ?? 0}`);
             if (wData.entries?.length) {
@@ -1130,7 +1153,7 @@
         try {
           const edUrl = `https://openlibrary.org${workKey}/editions.json?limit=100`;
           console.log(`  📂 Fetching editions for ${workKey}:`, edUrl);
-          const edRes = await fetch(edUrl);
+          const edRes = await olFetch(edUrl);
           const edData = await edRes.json();
           console.log(`  📂 ${workKey} returned ${edData.entries?.length ?? 0} editions`);
           if (edData.entries?.length) {
@@ -1151,7 +1174,7 @@
       console.log('👤 Fetching all works by author:', authorKey);
       try {
         const authorWorksUrl = `https://openlibrary.org/authors/${authorKey}/works.json?limit=50`;
-        const awRes = await fetch(authorWorksUrl);
+        const awRes = await olFetch(authorWorksUrl);
         const awData = await awRes.json();
         console.log(`👤 Author works returned: ${awData.entries?.length ?? 0}`);
 
@@ -1167,7 +1190,7 @@
           try {
             const edUrl = `https://openlibrary.org${work.key}/editions.json?limit=100`;
             console.log(`  📂 Fetching editions for author work ${work.key}`);
-            const edRes = await fetch(edUrl);
+            const edRes = await olFetch(edUrl);
             const edData = await edRes.json();
             console.log(`  📂 ${work.key} returned ${edData.entries?.length ?? 0} editions`);
             if (edData.entries?.length) {
