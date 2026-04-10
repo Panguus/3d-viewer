@@ -414,6 +414,85 @@
     font-family: 'Lato', sans-serif;
     font-style: italic;
   }
+  .lcc-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .lcc-wrap .lcc-tag {
+    margin-top: 0;
+  }
+  .btn-edit-lcc {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    padding: 2px 7px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .btn-edit-lcc:hover {
+    background: var(--gold-light);
+    color: white;
+    border-color: var(--gold);
+  }
+  .lcc-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .lcc-edit-input {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.82rem;
+    padding: 4px 8px;
+    border: 2px solid var(--green);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+    outline: none;
+    min-width: 160px;
+    flex: 1;
+  }
+  .btn-lcc-save {
+    background: var(--green);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-lcc-save:hover { background: var(--green-mid); }
+  .btn-lcc-cancel {
+    background: var(--cream-dark);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .btn-lcc-cancel:hover { background: var(--border); }
+  /* Editable LCC in log table */
+  .lcc-cell-edit {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    border: 1px solid var(--green);
+    border-radius: 4px;
+    width: 120px;
+    color: var(--text);
+    background: #fff;
+  }
     display: inline-block;
     background: var(--cream-dark);
     border: 1px solid var(--border);
@@ -1447,15 +1526,15 @@ Return only valid JSON, no extra text.`;
 
     function renderComparison(oldBook, newBook) {
     const isSameEdition = newBook.isbn === oldBook.isbn;
-    document.getElementById('old-body').innerHTML = bookCardHTML(oldBook, false);
-    document.getElementById('new-body').innerHTML = bookCardHTML(newBook, true, oldBook);
+    document.getElementById('old-body').innerHTML = bookCardHTML(oldBook, false, null, 'old');
+    document.getElementById('new-body').innerHTML = bookCardHTML(newBook, true, oldBook, 'new');
     const newCard = document.getElementById('card-new');
     newCard.classList.toggle('is-latest', isSameEdition);
     document.getElementById('comparison').style.display = 'block';
     document.getElementById('comparison').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  function bookCardHTML(book, isNew, oldBook) {
+  function bookCardHTML(book, isNew, oldBook, side = 'old') {
     const cover = book.coverUrl
       ? `<img class="book-cover" src="${book.coverUrl}" alt="Book cover" data-isbn="${book.isbn}" onerror="this.outerHTML=noCoverHTML()" onload="checkCoverValid(this)">`
       : `<div class="no-cover">📚<br>No cover<br>available</div>`;
@@ -1487,11 +1566,24 @@ Return only valid JSON, no extra text.`;
       badge = `<div class="latest-badge">✦ Newer Edition — ${book.year}</div>`;
     }
 
-    const lccDisplay = book.lcc
+    const lccVal = book.lcc || '';
+    const lccTagInner = book.lcc
       ? `<div class="lcc-tag">📋 ${escHtml(book.lcc)}</div>`
       : book.gbCategories
         ? `<div class="lcc-tag lcc-missing" title="No LC call number found — showing Google Books subject category">🏷 ${escHtml(book.gbCategories)} <span style="opacity:0.6;font-size:0.7em">(GB category)</span></div>`
-        : `<div class="lcc-tag lcc-missing">📋 No LCC on file</div>`;
+        : `<div class="lcc-tag lcc-missing">📋 No call number on file</div>`;
+    const lccDisplay = `
+      <div class="lcc-wrap" id="lcc-wrap-${side}">
+        ${lccTagInner}
+        <button class="btn-edit-lcc" onclick="startEditLcc('${side}')">✏️ Edit</button>
+      </div>
+      <div class="lcc-edit-row" id="lcc-edit-${side}" style="display:none;">
+        <input class="lcc-edit-input" id="lcc-input-${side}" type="text"
+          value="${escHtml(lccVal)}" placeholder="e.g. QA76.76.H94 G64 2009"
+          onkeydown="if(event.key==='Enter')saveEditLcc('${side}');if(event.key==='Escape')cancelEditLcc('${side}')">
+        <button class="btn-lcc-save" onclick="saveEditLcc('${side}')">✔ Save</button>
+        <button class="btn-lcc-cancel" onclick="cancelEditLcc('${side}')">Cancel</button>
+      </div>`;
 
     return `
       ${topBanner}
@@ -1548,6 +1640,59 @@ Return only valid JSON, no extra text.`;
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // ─── LCC EDIT ─────────────────────────────────────────────────────────────
+  function startEditLcc(side) {
+    document.getElementById(`lcc-wrap-${side}`).style.display = 'none';
+    const editRow = document.getElementById(`lcc-edit-${side}`);
+    editRow.style.display = 'flex';
+    document.getElementById(`lcc-input-${side}`).focus();
+    document.getElementById(`lcc-input-${side}`).select();
+  }
+
+  function cancelEditLcc(side) {
+    document.getElementById(`lcc-wrap-${side}`).style.display = 'flex';
+    document.getElementById(`lcc-edit-${side}`).style.display = 'none';
+  }
+
+  function saveEditLcc(side) {
+    const newLcc = document.getElementById(`lcc-input-${side}`).value.trim();
+    const book = side === 'old' ? currentOldBook : currentNewBook;
+    if (!book) return;
+    book.lcc = newLcc || null;
+
+    // Re-render just the lcc-wrap with updated value
+    const tagHtml = newLcc
+      ? `<div class="lcc-tag">📋 ${escHtml(newLcc)}</div>`
+      : `<div class="lcc-tag lcc-missing">📋 No call number on file</div>`;
+    document.getElementById(`lcc-wrap-${side}`).innerHTML =
+      `${tagHtml}<button class="btn-edit-lcc" onclick="startEditLcc('${side}')">✏️ Edit</button>`;
+    document.getElementById(`lcc-wrap-${side}`).style.display = 'flex';
+    document.getElementById(`lcc-edit-${side}`).style.display = 'none';
+    showToast(`📋 Call number updated${newLcc ? ': ' + newLcc : ' (cleared)'}`);
+  }
+
+  // ─── LOG TABLE LCC INLINE EDIT ────────────────────────────────────────────
+  function editLogLcc(num, field) {
+    const cell = document.getElementById(`log-lcc-${field}-${num}`);
+    const current = cell.textContent.trim() === '—' ? '' : cell.textContent.trim();
+    cell.innerHTML = `<input class="lcc-cell-edit" id="lcc-cell-input-${field}-${num}"
+      type="text" value="${escHtml(current)}" placeholder="Call number"
+      onblur="saveLogLcc(${num},'${field}',this.value)"
+      onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape'){this.value='${escHtml(current)}';this.blur();}">`;
+    document.getElementById(`lcc-cell-input-${field}-${num}`).focus();
+    document.getElementById(`lcc-cell-input-${field}-${num}`).select();
+  }
+
+  function saveLogLcc(num, field, val) {
+    const entry = logEntries.find(e => e.num === num);
+    if (!entry) return;
+    const trimmed = val.trim() || '—';
+    if (field === 'old') entry.oldLcc = trimmed;
+    else entry.newLcc = trimmed;
+    const cell = document.getElementById(`log-lcc-${field}-${num}`);
+    if (cell) cell.innerHTML = escHtml(trimmed);
+  }
+
   // ─── LOG ─────────────────────────────────────────────────────────────────
   function addToLog() {
     if (!currentOldBook) return;
@@ -1580,7 +1725,7 @@ Return only valid JSON, no extra text.`;
   function markAsSame() {
     if (!currentOldBook) return;
     currentNewBook = currentOldBook;
-    document.getElementById('new-body').innerHTML = bookCardHTML(currentOldBook, true, currentOldBook);
+    document.getElementById('new-body').innerHTML = bookCardHTML(currentOldBook, true, currentOldBook, 'new');
     document.getElementById('card-new').classList.add('is-latest');
     showToast('📌 Marked as same edition.');
   }
@@ -1604,12 +1749,14 @@ Return only valid JSON, no extra text.`;
       <td class="mono">${entry.oldIsbn}</td>
       <td style="max-width:160px;">${escHtml(entry.oldTitle)}</td>
       <td style="text-align:center;">${entry.oldYear}</td>
-      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;">${entry.oldLcc}</td>
+      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;cursor:pointer;" title="Click to edit call number"
+          id="log-lcc-old-${entry.num}" onclick="editLogLcc(${entry.num},'old')">${entry.oldLcc}</td>
       <td class="update-arrow" style="text-align:center;">→</td>
       <td class="mono">${entry.newIsbn}</td>
       <td style="max-width:160px;">${escHtml(entry.newTitle)}</td>
       <td style="text-align:center;">${entry.newYear}</td>
-      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;">${entry.newLcc}</td>
+      <td class="mono" style="font-size:0.72rem;color:#1a3a6b;cursor:pointer;" title="Click to edit call number"
+          id="log-lcc-new-${entry.num}" onclick="editLogLcc(${entry.num},'new')">${entry.newLcc}</td>
       <td style="color:var(--text-muted);font-size:0.8rem;">${escHtml(entry.author)}</td>
       <td>${statusBadge}</td>
       <td><button class="btn-row-del" onclick="deleteRow(${entry.num})">✕</button></td>
