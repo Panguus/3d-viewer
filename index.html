@@ -965,7 +965,7 @@
     }
   }
 
-  // ── Step 1: Fetch the scanned ISBN from Open Library ──────────────────────
+  // ── Step 1: Fetch the scanned ISBN from Open Library, patch gaps with Google Books ──
   async function fetchByISBN(isbn) {
     const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
     console.log('📡 Fetching ISBN from OL:', url);
@@ -973,8 +973,83 @@
     const data = await res.json();
     const info = data[`ISBN:${isbn}`];
     console.log('📡 Raw OL ISBN response:', JSON.stringify(info, null, 2));
-    if (!info) return null;
-    return parseBookOL(info, isbn);
+
+    let book = info ? parseBookOL(info, isbn) : null;
+
+    // Check whether we need Google Books — either OL had nothing, or key fields are missing
+    const needsAuthor = !book || book.authors[0] === 'Unknown Author';
+    const needsLcc    = !book || !book.lcc;
+    const needsTitle  = !book;
+
+    if (needsAuthor || needsLcc || needsTitle) {
+      console.log('📡 Falling back to Google Books for missing fields (author/lcc/title)…');
+      const gb = await fetchGoogleBooksMeta(isbn);
+      if (gb) {
+        if (!book) {
+          // OL had nothing at all — build entirely from Google Books
+          book = gb;
+          console.log('📗 Built book record entirely from Google Books:', gb.title);
+        } else {
+          // OL had a partial record — patch only the missing pieces
+          if (needsAuthor && gb.authors[0] !== 'Unknown Author') {
+            console.log('📗 Patching author from Google Books:', gb.authors);
+            book.authors = gb.authors;
+          }
+          if (!book.subtitle && gb.subtitle) book.subtitle = gb.subtitle;
+          if (!book.pageCount && gb.pageCount) book.pageCount = gb.pageCount;
+          if (!book.coverUrl && gb.coverUrl) book.coverUrl = gb.coverUrl;
+          if (gb.gbCategories) book.gbCategories = gb.gbCategories;
+          book.gbVerified = true;
+        }
+      } else {
+        console.log('📗 Google Books also returned nothing for ISBN:', isbn);
+      }
+    }
+
+    return book;
+  }
+
+  // ── Fetch metadata from Google Books by ISBN ─────────────────────────────
+  async function fetchGoogleBooksMeta(isbn) {
+    try {
+      const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${GB_KEY}`;
+      console.log('📗 Google Books meta fetch:', url);
+      const res = await fetch(url);
+      const data = await res.json();
+      const vol = data.items?.[0]?.volumeInfo;
+      if (!vol) return null;
+      console.log('📗 Raw Google Books response:', JSON.stringify(vol, null, 2));
+
+      const isbn13 = vol.industryIdentifiers?.find(i => i.type === 'ISBN_13')?.identifier || null;
+      const isbn10 = vol.industryIdentifiers?.find(i => i.type === 'ISBN_10')?.identifier || null;
+      const resolvedIsbn = isbn13 || isbn10 || isbn;
+
+      const categories = (vol.categories || []).join('; ') || null;
+
+      const imageLinks = vol.imageLinks || {};
+      const coverUrl = (imageLinks.large || imageLinks.medium || imageLinks.thumbnail || imageLinks.smallThumbnail || null)
+        ?.replace('http://', 'https://')?.replace('&edge=curl', '') || null;
+
+      return {
+        title:        vol.title || 'Unknown Title',
+        subtitle:     vol.subtitle || '',
+        authors:      (vol.authors || []).filter(Boolean).length ? vol.authors : ['Unknown Author'],
+        publisher:    vol.publisher || '—',
+        year:         vol.publishedDate ? parseInt(vol.publishedDate.slice(0, 4)) : null,
+        isbn:         resolvedIsbn,
+        coverUrl,
+        workKey:      null,
+        authorKey:    null,
+        pageCount:    vol.pageCount || null,
+        lcc:          null,   // Google Books API does not expose LC call numbers
+        gbCategories: categories,
+        gbVerified:   true,
+        olVerified:   false,
+      };
+    } catch (err) {
+      console.error('❌ Google Books meta fetch error:', err);
+      return null;
+    }
   }
 
   function parseBookOL(info, isbnFallback) {
@@ -1427,7 +1502,9 @@ Return only valid JSON, no extra text.`;
 
     const lccDisplay = book.lcc
       ? `<div class="lcc-tag">📋 ${escHtml(book.lcc)}</div>`
-      : `<div class="lcc-tag lcc-missing">📋 No LCC on file</div>`;
+      : book.gbCategories
+        ? `<div class="lcc-tag lcc-missing" title="No LC call number found — showing Google Books subject category">🏷 ${escHtml(book.gbCategories)} <span style="opacity:0.6;font-size:0.7em">(GB category)</span></div>`
+        : `<div class="lcc-tag lcc-missing">📋 No LCC on file</div>`;
 
     return `
       ${topBanner}
@@ -1442,6 +1519,9 @@ Return only valid JSON, no extra text.`;
       <div class="isbn-tag">${book.isbn}</div>
       ${lccDisplay}
       ${badge}
+      <div style="margin-top:8px;font-size:0.68rem;color:var(--text-muted);opacity:0.7;">
+        Source: ${book.olVerified && book.gbVerified ? '📖 Open Library + 📗 Google Books' : book.gbVerified ? '📗 Google Books only' : '📖 Open Library'}
+      </div>
     `;
   }
 
