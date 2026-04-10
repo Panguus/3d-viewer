@@ -1274,6 +1274,7 @@ Return only valid JSON, no extra text.`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
         signal: controller.signal,
+        referrerPolicy: 'no-referrer',
       });
       clearTimeout(timeout);
       const data = await res.json();
