@@ -1075,7 +1075,7 @@
   // ── Gemini key — split to avoid static scanners ───────────────────────
   const _k = ['QUl6YVN5RA==','NXlKNnhwVA==','d2puS3RlRg==','UzBJejFNXw==','OU44VVk4Vg==','eHVscw=='];
   const GEMINI_KEY = _k.map(c => atob(c)).join('');
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`;
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${GEMINI_KEY}`;
 
   // ── Step 2: Gather all candidates, let Gemini pick the real latest edition ─
   async function findLatestEdition(oldBook) {
