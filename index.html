@@ -1660,15 +1660,33 @@ Return only valid JSON, no extra text.`;
     if (!book) return;
     book.lcc = newLcc || null;
 
-    // Re-render just the lcc-wrap with updated value
+    // If old and new are the same book (already latest), sync the other side too
+    const isSameEdition = currentOldBook && currentNewBook &&
+      currentOldBook.isbn === currentNewBook.isbn;
+    if (isSameEdition) {
+      currentOldBook.lcc = newLcc || null;
+      currentNewBook.lcc = newLcc || null;
+      ['old', 'new'].forEach(s => updateLccWrap(s, newLcc));
+      showToast(`📋 Call number synced to both fields${newLcc ? ': ' + newLcc : ' (cleared)'}`);
+    } else {
+      updateLccWrap(side, newLcc);
+      showToast(`📋 Call number updated${newLcc ? ': ' + newLcc : ' (cleared)'}`);
+    }
+
+    document.getElementById(`lcc-edit-${side}`).style.display = 'none';
+  }
+
+  function updateLccWrap(side, newLcc) {
+    const wrap = document.getElementById(`lcc-wrap-${side}`);
+    if (!wrap) return;
     const tagHtml = newLcc
       ? `<div class="lcc-tag">📋 ${escHtml(newLcc)}</div>`
       : `<div class="lcc-tag lcc-missing">📋 No call number on file</div>`;
-    document.getElementById(`lcc-wrap-${side}`).innerHTML =
-      `${tagHtml}<button class="btn-edit-lcc" onclick="startEditLcc('${side}')">✏️ Edit</button>`;
-    document.getElementById(`lcc-wrap-${side}`).style.display = 'flex';
-    document.getElementById(`lcc-edit-${side}`).style.display = 'none';
-    showToast(`📋 Call number updated${newLcc ? ': ' + newLcc : ' (cleared)'}`);
+    wrap.innerHTML = `${tagHtml}<button class="btn-edit-lcc" onclick="startEditLcc('${side}')">✏️ Edit</button>`;
+    wrap.style.display = 'flex';
+    // Also update the hidden input value for the other side if it exists
+    const otherInput = document.getElementById(`lcc-input-${side}`);
+    if (otherInput) otherInput.value = newLcc || '';
   }
 
   // ─── LOG TABLE LCC INLINE EDIT ────────────────────────────────────────────
